@@ -1,7 +1,7 @@
 use std::{
     fmt::Debug,
     sync::{
-        Arc,
+        Arc, OnceLock,
         atomic::{AtomicBool, Ordering},
     },
 };
@@ -14,28 +14,46 @@ mod platform;
 #[cfg(test)]
 mod tests;
 
+static TCP_IP_APP: OnceLock<Arc<TcpIpApp>> = OnceLock::new();
+
+pub fn tcp_ip_run() -> Result<(), TcpIpError> {
+    let mut tcp_ip_app = TcpIpApp::new()?;
+
+    let loopback_dev: Arc<dyn NetDevice> = Arc::new(devices::LoopbackDevice::new());
+    tcp_ip_app.register_net_device(Arc::clone(&loopback_dev));
+
+    TCP_IP_APP
+        .set(Arc::new(tcp_ip_app))
+        .map_err(|_| TcpIpError::FaildToInit)?;
+
+    TCP_IP_APP.get().unwrap().run();
+
+    Ok(())
+}
+
 #[derive(Debug)]
 pub enum TcpIpError {
+    FaildToInit,
     DeviceAlreadyOpened { name: String },
     DeviceAlreadyClosed { name: String },
     DataLongerThanMTU { mtu: u16, len: usize },
 }
 
 #[derive(Debug)]
-pub struct TcpIpApp {
+struct TcpIpApp {
     terminated: Arc<AtomicBool>,
     devices: Vec<NetDeviceContainer>,
 }
 
 impl TcpIpApp {
-    pub fn new() -> Result<Self, TcpIpError> {
+    fn new() -> Result<Self, TcpIpError> {
         Ok(Self {
             terminated: Arc::new(AtomicBool::new(false)),
             devices: Vec::new(),
         })
     }
 
-    pub fn run(self) {
+    fn run(&self) {
         signal_hook::flag::register(signal_hook::consts::SIGINT, Arc::clone(&self.terminated))
             .unwrap();
 
@@ -50,10 +68,11 @@ impl TcpIpApp {
         println!("Cleaning up completed.");
     }
 
-    fn register_net_device(&mut self, dev: Box<dyn NetDevice>) {
+    fn register_net_device(&mut self, dev: Arc<dyn NetDevice>) {
         let dev = NetDeviceContainer {
             name: format!("net{}", self.devices.len()),
             dev,
+            is_open: false,
         };
 
         self.devices.push(dev);
@@ -62,7 +81,8 @@ impl TcpIpApp {
 
 struct NetDeviceContainer {
     name: String,
-    dev: Box<dyn NetDevice>,
+    dev: Arc<dyn NetDevice>,
+    is_open: bool,
 }
 
 impl Debug for NetDeviceContainer {
@@ -74,40 +94,40 @@ impl Debug for NetDeviceContainer {
 impl NetDeviceContainer {
     fn open(&mut self) -> Result<(), TcpIpError> {
         println!("opening dev={}", &self.name);
-        if self.dev.is_open() {
+        if self.is_open {
             Err(TcpIpError::DeviceAlreadyOpened {
                 name: self.name.clone(),
             })
         } else {
             self.dev.open()?;
-            self.dev.set_open_flag();
+            self.is_open = true;
             Ok(())
         }
     }
 
     fn close(&mut self) -> Result<(), TcpIpError> {
         println!("closing dev={}", &self.name);
-        if self.dev.is_close() {
+        if !self.is_open {
             Err(TcpIpError::DeviceAlreadyClosed {
                 name: self.name.clone(),
             })
         } else {
             self.dev.close()?;
-            self.dev.set_close_flag();
+            self.is_open = false;
             Ok(())
         }
     }
 
     fn output(&mut self, typ: NetProtocolType, data: &[u8], dst: ()) -> Result<(), TcpIpError> {
         println!("outputing dev={}", &self.name);
-        if self.dev.is_close() {
+        if !self.is_open {
             Err(TcpIpError::DeviceAlreadyClosed {
                 name: self.name.clone(),
             })
         } else {
-            if (self.dev.mtu() as usize) < data.len() {
+            if (self.dev.info().mtu() as usize) < data.len() {
                 Err(TcpIpError::DataLongerThanMTU {
-                    mtu: self.dev.mtu(),
+                    mtu: self.dev.info().mtu(),
                     len: data.len(),
                 })
             } else {

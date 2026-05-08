@@ -1,4 +1,3 @@
 fn main() {
-    let app = microps_rs::TcpIpApp::new().unwrap();
-    app.run();
+    microps_rs::tcp_ip_run().unwrap();
 }
