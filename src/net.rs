@@ -77,6 +77,11 @@ impl TcpIpApp {
 
         // cleanup
         info!("Escape from TCP/IP processing.");
+
+        for dev in &mut self.devices {
+            dev.close()?;
+        }
+
         info!("Cleaning up completed.");
 
         Ok(())

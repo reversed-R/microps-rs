@@ -1,4 +1,5 @@
 use crate::{
+    dbg,
     devices::{NET_DEVICE_FLAG_LOOPBACK, NetDevice, NetDeviceInner, NetDeviceType},
     info,
     net::net_input,
@@ -34,6 +35,7 @@ impl NetDevice for LoopbackDevice {
     }
 
     fn open(&self) -> Result<(), super::NetDeviceError> {
+        dbg!("opening loopback device...");
         Ok(()) // nothing to do
     }
 
@@ -51,6 +53,7 @@ impl NetDevice for LoopbackDevice {
     }
 
     fn close(&self) -> Result<(), super::NetDeviceError> {
+        dbg!("closing loopback device...");
         Ok(()) // nothing to do
     }
 }
