@@ -67,8 +67,8 @@ impl TcpIpApp {
         signal_hook::flag::register(signal_hook::consts::SIGINT, Arc::clone(&self.terminated))
             .unwrap();
 
-        println!("Starting TCP/IP processing...");
-        println!("Press <Ctrl> + C to terminate.");
+        info!("Starting TCP/IP processing...");
+        info!("Press <Ctrl> + C to terminate.");
 
         for dev in &mut self.devices {
             dev.open()?;
@@ -81,8 +81,8 @@ impl TcpIpApp {
         }
 
         // cleanup
-        println!("Escape from TCP/IP processing.");
-        println!("Cleaning up completed.");
+        info!("Escape from TCP/IP processing.");
+        info!("Cleaning up completed.");
 
         Ok(())
     }
@@ -112,7 +112,7 @@ impl Debug for NetDeviceContainer {
 
 impl NetDeviceContainer {
     fn open(&mut self) -> Result<(), TcpIpError> {
-        println!("opening dev={}", &self.name);
+        dbg!("opening dev={}", &self.name);
         if self.is_open {
             Err(TcpIpError::DeviceAlreadyOpened {
                 name: self.name.clone(),
@@ -125,7 +125,7 @@ impl NetDeviceContainer {
     }
 
     fn close(&mut self) -> Result<(), TcpIpError> {
-        println!("closing dev={}", &self.name);
+        dbg!("closing dev={}", &self.name);
         if !self.is_open {
             Err(TcpIpError::DeviceAlreadyClosed {
                 name: self.name.clone(),
@@ -138,7 +138,7 @@ impl NetDeviceContainer {
     }
 
     fn output(&self, typ: NetProtocolType, data: &[u8], dst: ()) -> Result<(), TcpIpError> {
-        println!("outputing dev={}", &self.name);
+        dbg!("outputing dev={}", &self.name);
         if !self.is_open {
             Err(TcpIpError::DeviceAlreadyClosed {
                 name: self.name.clone(),
@@ -159,7 +159,7 @@ impl NetDeviceContainer {
 }
 
 pub(crate) fn net_input(typ: NetProtocolType, data: &[u8]) -> Result<(), NetDeviceError> {
-    println!("net_input: type={typ:?}, len={}", data.len());
+    dbg!("net_input: type={typ:?}, len={}", data.len());
 
     debugdump(data);
 

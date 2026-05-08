@@ -1,3 +1,43 @@
+#[macro_export]
+macro_rules! dbg {
+    ($fmt:literal, $($arg:tt)*) => {
+        println!("[dbg] {} ({}:{})", format!($fmt, $($arg)*), file!(), line!());
+    };
+    ($str:literal) => {
+        println!("[dbg] {} ({}:{})", $str, file!(), line!());
+    };
+}
+
+#[macro_export]
+macro_rules! info {
+    ($fmt:literal, $($arg:tt)*) => {
+        println!("[info] {} ({}:{})", format!($fmt, $($arg)*), file!(), line!());
+    };
+    ($str:literal) => {
+        println!("[info] {} ({}:{})", $str, file!(), line!());
+    };
+}
+
+#[macro_export]
+macro_rules! warn {
+    ($fmt:literal, $($arg:tt)*) => {
+        println!("[warn] {} ({}:{})", format!($fmt, $($arg)*), file!(), line!());
+    };
+    ($str:literal) => {
+        println!("[warn] {} ({}:{})", $str, file!(), line!());
+    };
+}
+
+#[macro_export]
+macro_rules! error {
+    ($fmt:literal, $($arg:tt)*) => {
+        println!("[error] {} ({}:{})", format!($fmt, $($arg)*), file!(), line!());
+    };
+    ($str:literal) => {
+        println!("[error] {} ({}:{})", $str, file!(), line!());
+    };
+}
+
 pub(crate) fn debugdump(data: &[u8]) {
     let size = data.len();
 

@@ -1,6 +1,6 @@
 use crate::{
     devices::{NET_DEVICE_FLAG_LOOPBACK, NetDevice, NetDeviceInner, NetDeviceType},
-    net_input,
+    info, net_input,
     print::debugdump,
 };
 
@@ -42,7 +42,7 @@ impl NetDevice for LoopbackDevice {
         data: &[u8],
         dst: (),
     ) -> Result<(), super::NetDeviceError> {
-        println!("loopback device: type={typ:?}, len={}", data.len());
+        info!("loopback device: type={typ:?}, len={}", data.len());
 
         debugdump(data);
 
