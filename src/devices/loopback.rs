@@ -2,7 +2,7 @@ use crate::{
     dbg,
     devices::{NET_DEVICE_FLAG_LOOPBACK, NetDevice, NetDeviceInner, NetDeviceType},
     info,
-    net::net_input,
+    net::input_to_app,
     print::debugdump,
 };
 
@@ -49,7 +49,7 @@ impl NetDevice for LoopbackDevice {
 
         debugdump(data);
 
-        net_input(typ, data, self)
+        input_to_app(typ, data, self)
     }
 
     fn close(&self) -> Result<(), super::NetDeviceError> {

@@ -1,5 +1,4 @@
 use std::{
-    cell::RefCell,
     fmt::Debug,
     sync::{
         Arc, Mutex, OnceLock,
@@ -50,10 +49,10 @@ pub enum TcpIpError {
 }
 
 #[derive(Debug)]
-struct TcpIpApp {
+pub(crate) struct TcpIpApp {
     terminated: Arc<AtomicBool>,
     devices: Vec<Arc<Mutex<NetDeviceContainer>>>,
-    protocols: Vec<Box<dyn NetProtocol>>,
+    pub(crate) protocols: Vec<Box<dyn NetProtocol>>,
 }
 
 impl TcpIpApp {
@@ -171,7 +170,7 @@ impl NetDeviceContainer {
     }
 }
 
-pub(crate) fn net_input<D: NetDevice>(
+pub(crate) fn input_to_app<D: NetDevice>(
     typ: NetProtocolType,
     data: &[u8],
     dev: &D,
