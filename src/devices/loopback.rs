@@ -1,4 +1,8 @@
-use crate::devices::{NET_DEVICE_FLAG_LOOPBACK, NetDevice, NetDeviceInner, NetDeviceType};
+use crate::{
+    devices::{NET_DEVICE_FLAG_LOOPBACK, NetDevice, NetDeviceInner, NetDeviceType},
+    net_input,
+    print::debugdump,
+};
 
 /// maximum size of IP datagram
 const LOOPBACK_MTU: u16 = u16::MAX;
@@ -38,7 +42,11 @@ impl NetDevice for LoopbackDevice {
         data: &[u8],
         dst: (),
     ) -> Result<(), super::NetDeviceError> {
-        todo!()
+        println!("loopback device: type={typ:?}, len={}", data.len());
+
+        debugdump(data);
+
+        net_input(typ, data)
     }
 
     fn close(&self) -> Result<(), super::NetDeviceError> {

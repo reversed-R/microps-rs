@@ -17,7 +17,9 @@ pub(crate) trait NetDevice: Debug + Send + Sync + 'static {
 pub(crate) enum NetDeviceError {}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum NetProtocolType {}
+pub(crate) enum NetProtocolType {
+    Loopback,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum NetDeviceType {

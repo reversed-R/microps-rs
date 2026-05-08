@@ -1,20 +1,30 @@
 use std::{
     fmt::Debug,
     sync::{
-        Arc, OnceLock,
+        Arc, Mutex, OnceLock,
         atomic::{AtomicBool, Ordering},
     },
 };
 
-use crate::devices::{NetDevice, NetProtocolType};
+use crate::{
+    devices::{NetDevice, NetDeviceError, NetProtocolType},
+    print::debugdump,
+};
 
 mod devices;
 mod platform;
+mod print;
 
 #[cfg(test)]
 mod tests;
 
-static TCP_IP_APP: OnceLock<Arc<TcpIpApp>> = OnceLock::new();
+const TEST_DATA: &[u8] = &[
+    0x45, 0x00, 0x00, 0x30, 0x00, 0x80, 0x00, 0x00, 0xff, 0x01, 0xbd, 0x4a, 0x7f, 0x00, 0x00, 0x01,
+    0x7f, 0x00, 0x00, 0x01, 0x08, 0x00, 0x35, 0x64, 0x00, 0x80, 0x00, 0x01, 0x31, 0x32, 0x33, 0x34,
+    0x35, 0x36, 0x37, 0x38, 0x39, 0x30, 0x21, 0x40, 0x23, 0x24, 0x25, 0x5e, 0x26, 0x2a, 0x28, 0x29,
+];
+
+static TCP_IP_APP: OnceLock<Arc<Mutex<TcpIpApp>>> = OnceLock::new();
 
 pub fn tcp_ip_run() -> Result<(), TcpIpError> {
     let mut tcp_ip_app = TcpIpApp::new()?;
@@ -23,10 +33,10 @@ pub fn tcp_ip_run() -> Result<(), TcpIpError> {
     tcp_ip_app.register_net_device(Arc::clone(&loopback_dev));
 
     TCP_IP_APP
-        .set(Arc::new(tcp_ip_app))
+        .set(Arc::new(Mutex::new(tcp_ip_app)))
         .map_err(|_| TcpIpError::FaildToInit)?;
 
-    TCP_IP_APP.get().unwrap().run();
+    TCP_IP_APP.get().unwrap().lock().unwrap().run()?;
 
     Ok(())
 }
@@ -53,19 +63,28 @@ impl TcpIpApp {
         })
     }
 
-    fn run(&self) {
+    fn run(&mut self) -> Result<(), TcpIpError> {
         signal_hook::flag::register(signal_hook::consts::SIGINT, Arc::clone(&self.terminated))
             .unwrap();
 
         println!("Starting TCP/IP processing...");
         println!("Press <Ctrl> + C to terminate.");
+
+        for dev in &mut self.devices {
+            dev.open()?;
+        }
+
         while !self.terminated.load(Ordering::Relaxed) {
-            // todo
+            for dev in &self.devices {
+                dev.output(NetProtocolType::Loopback, TEST_DATA, ())?;
+            }
         }
 
         // cleanup
         println!("Escape from TCP/IP processing.");
         println!("Cleaning up completed.");
+
+        Ok(())
     }
 
     fn register_net_device(&mut self, dev: Arc<dyn NetDevice>) {
@@ -118,7 +137,7 @@ impl NetDeviceContainer {
         }
     }
 
-    fn output(&mut self, typ: NetProtocolType, data: &[u8], dst: ()) -> Result<(), TcpIpError> {
+    fn output(&self, typ: NetProtocolType, data: &[u8], dst: ()) -> Result<(), TcpIpError> {
         println!("outputing dev={}", &self.name);
         if !self.is_open {
             Err(TcpIpError::DeviceAlreadyClosed {
@@ -137,4 +156,12 @@ impl NetDeviceContainer {
             }
         }
     }
+}
+
+pub(crate) fn net_input(typ: NetProtocolType, data: &[u8]) -> Result<(), NetDeviceError> {
+    println!("net_input: type={typ:?}, len={}", data.len());
+
+    debugdump(data);
+
+    Ok(())
 }
