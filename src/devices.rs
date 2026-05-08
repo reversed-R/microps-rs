@@ -1,6 +1,6 @@
 use std::fmt::Debug;
 
-use crate::TcpIpError;
+use crate::{TcpIpError, protocols::NetProtocolType};
 
 mod loopback;
 
@@ -15,11 +15,6 @@ pub(crate) trait NetDevice: Debug + Send + Sync + 'static {
 
 #[derive(Debug, Clone)]
 pub(crate) enum NetDeviceError {}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum NetProtocolType {
-    Loopback,
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum NetDeviceType {

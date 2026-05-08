@@ -49,7 +49,7 @@ impl NetDevice for LoopbackDevice {
 
         debugdump(data);
 
-        net_input(typ, data)
+        net_input(typ, data, self)
     }
 
     fn close(&self) -> Result<(), super::NetDeviceError> {

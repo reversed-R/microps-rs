@@ -2,6 +2,7 @@ mod devices;
 mod net;
 mod platform;
 mod print;
+mod protocols;
 
 #[cfg(test)]
 mod tests;

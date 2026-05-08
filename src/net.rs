@@ -1,4 +1,5 @@
 use std::{
+    cell::RefCell,
     fmt::Debug,
     sync::{
         Arc, Mutex, OnceLock,
@@ -8,9 +9,10 @@ use std::{
 
 use crate::{
     dbg,
-    devices::{NetDevice, NetDeviceError, NetProtocolType},
+    devices::{NetDevice, NetDeviceError},
     info,
     print::debugdump,
+    protocols::{IpProtocol, NetProtocol, NetProtocolType},
 };
 
 const TEST_DATA: &[u8] = &[
@@ -19,7 +21,7 @@ const TEST_DATA: &[u8] = &[
     0x35, 0x36, 0x37, 0x38, 0x39, 0x30, 0x21, 0x40, 0x23, 0x24, 0x25, 0x5e, 0x26, 0x2a, 0x28, 0x29,
 ];
 
-static TCP_IP_APP: OnceLock<Arc<Mutex<TcpIpApp>>> = OnceLock::new();
+static TCP_IP_APP: OnceLock<Arc<TcpIpApp>> = OnceLock::new();
 
 pub fn tcp_ip_run() -> Result<(), TcpIpError> {
     let mut tcp_ip_app = TcpIpApp::new()?;
@@ -27,11 +29,14 @@ pub fn tcp_ip_run() -> Result<(), TcpIpError> {
     let loopback_dev: Arc<dyn NetDevice> = Arc::new(crate::devices::LoopbackDevice::new());
     tcp_ip_app.register_net_device(Arc::clone(&loopback_dev));
 
+    let ip_proto = IpProtocol::new();
+    tcp_ip_app.register_net_protocol(ip_proto);
+
     TCP_IP_APP
-        .set(Arc::new(Mutex::new(tcp_ip_app)))
+        .set(Arc::new(tcp_ip_app))
         .map_err(|_| TcpIpError::FaildToInit)?;
 
-    TCP_IP_APP.get().unwrap().lock().unwrap().run()?;
+    TCP_IP_APP.get().unwrap().run()?;
 
     Ok(())
 }
@@ -47,7 +52,8 @@ pub enum TcpIpError {
 #[derive(Debug)]
 struct TcpIpApp {
     terminated: Arc<AtomicBool>,
-    devices: Vec<NetDeviceContainer>,
+    devices: Vec<Arc<Mutex<NetDeviceContainer>>>,
+    protocols: Vec<Box<dyn NetProtocol>>,
 }
 
 impl TcpIpApp {
@@ -55,31 +61,34 @@ impl TcpIpApp {
         Ok(Self {
             terminated: Arc::new(AtomicBool::new(false)),
             devices: Vec::new(),
+            protocols: Vec::new(),
         })
     }
 
-    fn run(&mut self) -> Result<(), TcpIpError> {
+    fn run(&self) -> Result<(), TcpIpError> {
         signal_hook::flag::register(signal_hook::consts::SIGINT, Arc::clone(&self.terminated))
             .unwrap();
 
         info!("Starting TCP/IP processing...");
         info!("Press <Ctrl> + C to terminate.");
 
-        for dev in &mut self.devices {
-            dev.open()?;
+        for dev in &self.devices {
+            dev.lock().unwrap().open()?;
         }
 
         while !self.terminated.load(Ordering::Relaxed) {
             for dev in &self.devices {
-                dev.output(NetProtocolType::Loopback, TEST_DATA, ())?;
+                dev.lock()
+                    .unwrap()
+                    .output(NetProtocolType::Ip, TEST_DATA, ())?;
             }
         }
 
         // cleanup
         info!("Escape from TCP/IP processing.");
 
-        for dev in &mut self.devices {
-            dev.close()?;
+        for dev in &self.devices {
+            dev.lock().unwrap().close()?;
         }
 
         info!("Cleaning up completed.");
@@ -88,13 +97,17 @@ impl TcpIpApp {
     }
 
     fn register_net_device(&mut self, dev: Arc<dyn NetDevice>) {
-        let dev = NetDeviceContainer {
+        let dev = Arc::new(Mutex::new(NetDeviceContainer {
             name: format!("net{}", self.devices.len()),
             dev,
             is_open: false,
-        };
+        }));
 
         self.devices.push(dev);
+    }
+
+    fn register_net_protocol<P: NetProtocol>(&mut self, proto: P) {
+        self.protocols.push(Box::new(proto));
     }
 }
 
@@ -158,10 +171,22 @@ impl NetDeviceContainer {
     }
 }
 
-pub(crate) fn net_input(typ: NetProtocolType, data: &[u8]) -> Result<(), NetDeviceError> {
+pub(crate) fn net_input<D: NetDevice>(
+    typ: NetProtocolType,
+    data: &[u8],
+    dev: &D,
+) -> Result<(), NetDeviceError> {
     dbg!("net_input: type={typ:?}, len={}", data.len());
 
     debugdump(data);
+
+    for proto in &TCP_IP_APP.get().unwrap().protocols {
+        if proto.typ() == typ {
+            proto.handle(data, dev);
+
+            return Ok(());
+        }
+    }
 
     Ok(())
 }
