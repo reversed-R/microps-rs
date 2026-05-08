@@ -1,6 +1,7 @@
 use crate::{
     devices::{NET_DEVICE_FLAG_LOOPBACK, NetDevice, NetDeviceInner, NetDeviceType},
-    info, net_input,
+    info,
+    net::net_input,
     print::debugdump,
 };
 
