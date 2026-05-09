@@ -42,13 +42,7 @@ impl NetProtocol for IpProtocol {
             }
 
             // hlen is N * 4, so even number.
-            let u16_slice = unsafe {
-                core::slice::from_raw_parts(
-                    data[..hdr.hlen()].as_ptr() as *const u16,
-                    hdr.hlen() / 2,
-                )
-            };
-            if cksum16(u16_slice, 0) != 0 {
+            if cksum16_from_bytes(&data[..hdr.hlen()], 0) != 0 {
                 return Err(NetProtocolError::BrokenCheckSum);
             }
 
@@ -60,7 +54,7 @@ impl NetProtocol for IpProtocol {
                 return Err(NetProtocolError::FragmentUnsurpported);
             }
 
-            for i in dev.ifaces() {
+            for i in dev.state().ifaces() {
                 match i {
                     NetIface::Ip(ip_iface) => {
                         dbg!("ip iface processing starts...");
@@ -240,10 +234,18 @@ impl IpHeader {
     }
 }
 
-fn cksum16(data: &[u16], init: u32) -> u16 {
+fn cksum16_from_bytes(data: &[u8], init: u32) -> u16 {
     let mut sum: u32 = init;
-    for w in data {
-        sum += *w as u32;
+
+    let word_len = data.len() / 2;
+    for widx in 0..word_len {
+        let idx = widx * 2;
+        sum += u16::from_be_bytes(data[idx..=idx + 1].try_into().unwrap()) as u32;
+    }
+
+    // 最後のbyteがあれば計算
+    if data.len() % 2 == 1 {
+        sum += data[data.len() - 1] as u32;
     }
     while sum >> 16 != 0 {
         sum = (sum & 0xffff) + (sum >> 16);

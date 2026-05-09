@@ -1,7 +1,7 @@
 use std::{
     fmt::Debug,
     sync::{
-        Arc, Mutex, OnceLock,
+        Arc, OnceLock, RwLock, RwLockReadGuard,
         atomic::{AtomicBool, Ordering},
     },
 };
@@ -38,8 +38,6 @@ pub fn tcp_ip_run() -> Result<(), TcpIpError> {
         NetIface::Ip(IpIface::new(IP_ADDR_LOOPBACK, IP_ADDR_LOOPBACK_NETMASK)),
         "net0",
     )?;
-
-    println!("tcp_ip_app: {tcp_ip_app:#?}");
 
     TCP_IP_APP
         .set(Arc::new(tcp_ip_app))
@@ -78,7 +76,7 @@ pub enum TcpIpError {
 #[derive(Debug)]
 pub(crate) struct TcpIpApp {
     terminated: Arc<AtomicBool>,
-    devices: Vec<Arc<Mutex<NetDeviceContainer>>>,
+    devices: Vec<NetDeviceContainer>,
     pub(crate) protocols: Vec<Box<dyn NetProtocol>>,
 }
 
@@ -99,14 +97,12 @@ impl TcpIpApp {
         info!("Press <Ctrl> + C to terminate.");
 
         for dev in &self.devices {
-            dev.lock().unwrap().open()?;
+            dev.open()?;
         }
 
         while !self.terminated.load(Ordering::Relaxed) {
             for dev in &self.devices {
-                dev.lock()
-                    .unwrap()
-                    .output(NetProtocolType::Ip, TEST_DATA, ())?;
+                dev.output(NetProtocolType::Ip, TEST_DATA, ())?;
             }
         }
 
@@ -114,7 +110,7 @@ impl TcpIpApp {
         info!("Escape from TCP/IP processing.");
 
         for dev in &self.devices {
-            dev.lock().unwrap().close()?;
+            dev.close()?;
         }
 
         info!("Cleaning up completed.");
@@ -123,14 +119,14 @@ impl TcpIpApp {
     }
 
     fn register_net_device(&mut self, dev: Arc<dyn NetDevice>) {
-        let dev = Arc::new(Mutex::new(NetDeviceContainer {
+        let dev = NetDeviceContainer {
             dev,
-            state: NetDeviceState {
+            state: Arc::new(RwLock::new(NetDeviceState {
                 name: format!("net{}", self.devices.len()),
                 is_open: false,
                 ifaces: Vec::new(),
-            },
-        }));
+            })),
+        };
 
         self.devices.push(dev);
     }
@@ -143,9 +139,9 @@ impl TcpIpApp {
         dbg!("registering iface on dev={}", dev);
 
         for d in &self.devices {
-            let mut d = d.try_lock().unwrap();
             if d.name() == dev {
-                if d.ifaces()
+                if d.state()
+                    .ifaces
                     .iter()
                     .any(|i| i.family_kind() == iface.family_kind())
                 {
@@ -154,7 +150,7 @@ impl TcpIpApp {
                         dev: dev.into(),
                     });
                 } else {
-                    d.state.ifaces.push(iface);
+                    d.state.write().unwrap().ifaces.push(iface);
                     return Ok(());
                 }
             }
@@ -169,11 +165,11 @@ impl TcpIpApp {
 #[derive(Debug)]
 pub(crate) struct NetDeviceContainer {
     dev: Arc<dyn NetDevice>,
-    state: NetDeviceState,
+    state: Arc<RwLock<NetDeviceState>>,
 }
 
 #[derive(Debug)]
-struct NetDeviceState {
+pub(crate) struct NetDeviceState {
     name: String,
     is_open: bool,
     ifaces: Vec<NetIface>,
@@ -181,21 +177,21 @@ struct NetDeviceState {
 
 impl NetDeviceContainer {
     #[inline]
-    fn name(&self) -> &String {
-        &self.state.name
+    fn name(&self) -> String {
+        self.state.read().unwrap().name.clone()
     }
 
     #[inline]
     fn is_open(&self) -> bool {
-        self.state.is_open
+        self.state.read().unwrap().is_open
     }
 
     #[inline]
-    pub(crate) fn ifaces(&self) -> &[NetIface] {
-        &self.state.ifaces
+    pub(crate) fn state(&self) -> RwLockReadGuard<'_, NetDeviceState> {
+        self.state.read().unwrap()
     }
 
-    fn open(&mut self) -> Result<(), TcpIpError> {
+    fn open(&self) -> Result<(), TcpIpError> {
         dbg!("opening dev={}", &self.name());
         if self.is_open() {
             Err(TcpIpError::DeviceAlreadyOpened {
@@ -203,12 +199,12 @@ impl NetDeviceContainer {
             })
         } else {
             self.dev.open()?;
-            self.state.is_open = true;
+            self.state.write().unwrap().is_open = true;
             Ok(())
         }
     }
 
-    fn close(&mut self) -> Result<(), TcpIpError> {
+    fn close(&self) -> Result<(), TcpIpError> {
         dbg!("closing dev={}", self.name());
         if !self.is_open() {
             Err(TcpIpError::DeviceAlreadyClosed {
@@ -216,7 +212,7 @@ impl NetDeviceContainer {
             })
         } else {
             self.dev.close()?;
-            self.state.is_open = false;
+            self.state.write().unwrap().is_open = false;
             Ok(())
         }
     }
