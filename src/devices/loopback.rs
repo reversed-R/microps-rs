@@ -41,15 +41,16 @@ impl NetDevice for LoopbackDevice {
 
     fn output(
         &self,
-        typ: super::NetProtocolType,
+        typ: crate::protocols::NetProtocolType,
         data: &[u8],
         dst: (),
+        dev: &crate::net::NetDeviceContainer,
     ) -> Result<(), super::NetDeviceError> {
         info!("loopback device: type={typ:?}, len={}", data.len());
 
         debugdump(data);
 
-        input_to_app(typ, data, self)
+        input_to_app(typ, data, dev)
     }
 
     fn close(&self) -> Result<(), super::NetDeviceError> {

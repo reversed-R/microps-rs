@@ -2,9 +2,11 @@ mod ip;
 
 use std::fmt::Debug;
 
-use crate::devices::NetDevice;
+use crate::{devices::NetDeviceError, interfaces::NetIfaceError, net::NetDeviceContainer};
 
-pub(crate) use ip::IpProtocol;
+pub(crate) use ip::{
+    IP_ADDR_BROADCAST, IP_ADDR_LOOPBACK, IP_ADDR_LOOPBACK_NETMASK, IpAddr, IpHeader, IpProtocol,
+};
 
 const NET_PROTOCOL_TYPE_IP: u16 = 0x0800;
 const NET_PROTOCOL_TYPE_ARP: u16 = 0x0806;
@@ -19,7 +21,7 @@ pub(crate) enum NetProtocolType {
 
 pub(crate) trait NetProtocol: Debug + Send + Sync + 'static {
     fn typ(&self) -> NetProtocolType;
-    fn handle(&self, data: &[u8], dev: &dyn NetDevice) -> Result<(), NetProtocolError>;
+    fn handle(&self, data: &[u8], dev: &NetDeviceContainer) -> Result<(), NetProtocolError>;
 }
 
 #[derive(Debug, Clone)]
@@ -29,6 +31,13 @@ pub(crate) enum NetProtocolError {
     UnsurpportedIpVersion { version: u8 },
     BrokenCheckSum,
     FragmentUnsurpported,
+    IfaceError { error: NetIfaceError },
+}
+
+impl From<NetProtocolError> for NetDeviceError {
+    fn from(value: NetProtocolError) -> Self {
+        Self::ProtocolError { err: value }
+    }
 }
 
 impl TryFrom<u16> for NetProtocolType {

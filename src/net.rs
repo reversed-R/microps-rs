@@ -10,8 +10,11 @@ use crate::{
     dbg,
     devices::{NetDevice, NetDeviceError},
     info,
+    interfaces::{IfaceFamilyKind, IpIface, NetIface},
     print::debugdump,
-    protocols::{IpProtocol, NetProtocol, NetProtocolType},
+    protocols::{
+        IP_ADDR_LOOPBACK, IP_ADDR_LOOPBACK_NETMASK, IpProtocol, NetProtocol, NetProtocolType,
+    },
 };
 
 const TEST_DATA: &[u8] = &[
@@ -31,6 +34,13 @@ pub fn tcp_ip_run() -> Result<(), TcpIpError> {
     let ip_proto = IpProtocol::new();
     tcp_ip_app.register_net_protocol(ip_proto);
 
+    tcp_ip_app.register_net_iface_on_device(
+        NetIface::Ip(IpIface::new(IP_ADDR_LOOPBACK, IP_ADDR_LOOPBACK_NETMASK)),
+        "net0",
+    )?;
+
+    println!("tcp_ip_app: {tcp_ip_app:#?}");
+
     TCP_IP_APP
         .set(Arc::new(tcp_ip_app))
         .map_err(|_| TcpIpError::FaildToInit)?;
@@ -43,9 +53,26 @@ pub fn tcp_ip_run() -> Result<(), TcpIpError> {
 #[derive(Debug)]
 pub enum TcpIpError {
     FaildToInit,
-    DeviceAlreadyOpened { name: String },
-    DeviceAlreadyClosed { name: String },
-    DataLongerThanMTU { mtu: u16, len: usize },
+    DeviceAlreadyOpened {
+        name: String,
+    },
+    DeviceAlreadyClosed {
+        name: String,
+    },
+    DataLongerThanMTU {
+        mtu: u16,
+        len: usize,
+    },
+    DuplicatedIfaceFamily {
+        family: IfaceFamilyKind,
+        dev: String, // device name
+    },
+    DeviceError {
+        error: NetDeviceError,
+    },
+    DeviceNotFound {
+        dev: String,
+    },
 }
 
 #[derive(Debug)]
@@ -97,9 +124,12 @@ impl TcpIpApp {
 
     fn register_net_device(&mut self, dev: Arc<dyn NetDevice>) {
         let dev = Arc::new(Mutex::new(NetDeviceContainer {
-            name: format!("net{}", self.devices.len()),
             dev,
-            is_open: false,
+            state: NetDeviceState {
+                name: format!("net{}", self.devices.len()),
+                is_open: false,
+                ifaces: Vec::new(),
+            },
         }));
 
         self.devices.push(dev);
@@ -108,52 +138,94 @@ impl TcpIpApp {
     fn register_net_protocol<P: NetProtocol>(&mut self, proto: P) {
         self.protocols.push(Box::new(proto));
     }
-}
 
-struct NetDeviceContainer {
-    name: String,
-    dev: Arc<dyn NetDevice>,
-    is_open: bool,
-}
+    fn register_net_iface_on_device(&self, iface: NetIface, dev: &str) -> Result<(), TcpIpError> {
+        dbg!("registering iface on dev={}", dev);
 
-impl Debug for NetDeviceContainer {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "NetDevice{{ name: \"{}\" }}", &self.name)
+        for d in &self.devices {
+            let mut d = d.try_lock().unwrap();
+            if d.name() == dev {
+                if d.ifaces()
+                    .iter()
+                    .any(|i| i.family_kind() == iface.family_kind())
+                {
+                    return Err(TcpIpError::DuplicatedIfaceFamily {
+                        family: iface.family_kind(),
+                        dev: dev.into(),
+                    });
+                } else {
+                    d.state.ifaces.push(iface);
+                    return Ok(());
+                }
+            }
+        }
+
+        Err(TcpIpError::DeviceNotFound {
+            dev: dev.to_string(),
+        })
     }
 }
 
+#[derive(Debug)]
+pub(crate) struct NetDeviceContainer {
+    dev: Arc<dyn NetDevice>,
+    state: NetDeviceState,
+}
+
+#[derive(Debug)]
+struct NetDeviceState {
+    name: String,
+    is_open: bool,
+    ifaces: Vec<NetIface>,
+}
+
 impl NetDeviceContainer {
+    #[inline]
+    fn name(&self) -> &String {
+        &self.state.name
+    }
+
+    #[inline]
+    fn is_open(&self) -> bool {
+        self.state.is_open
+    }
+
+    #[inline]
+    pub(crate) fn ifaces(&self) -> &[NetIface] {
+        &self.state.ifaces
+    }
+
     fn open(&mut self) -> Result<(), TcpIpError> {
-        dbg!("opening dev={}", &self.name);
-        if self.is_open {
+        dbg!("opening dev={}", &self.name());
+        if self.is_open() {
             Err(TcpIpError::DeviceAlreadyOpened {
-                name: self.name.clone(),
+                name: self.name().clone(),
             })
         } else {
             self.dev.open()?;
-            self.is_open = true;
+            self.state.is_open = true;
             Ok(())
         }
     }
 
     fn close(&mut self) -> Result<(), TcpIpError> {
-        dbg!("closing dev={}", &self.name);
-        if !self.is_open {
+        dbg!("closing dev={}", self.name());
+        if !self.is_open() {
             Err(TcpIpError::DeviceAlreadyClosed {
-                name: self.name.clone(),
+                name: self.name().clone(),
             })
         } else {
             self.dev.close()?;
-            self.is_open = false;
+            self.state.is_open = false;
             Ok(())
         }
     }
 
     fn output(&self, typ: NetProtocolType, data: &[u8], dst: ()) -> Result<(), TcpIpError> {
-        dbg!("outputing dev={}", &self.name);
-        if !self.is_open {
+        dbg!("outputing dev={}", self.name());
+        if !self.is_open() {
             Err(TcpIpError::DeviceAlreadyClosed {
-                name: self.name.clone(),
+                name: self.name().clone(),
             })
         } else {
             if (self.dev.info().mtu() as usize) < data.len() {
@@ -162,7 +234,7 @@ impl NetDeviceContainer {
                     len: data.len(),
                 })
             } else {
-                self.dev.output(typ, data, dst)?;
+                self.dev.output(typ, data, dst, self)?;
 
                 Ok(())
             }
@@ -170,10 +242,27 @@ impl NetDeviceContainer {
     }
 }
 
-pub(crate) fn input_to_app<D: NetDevice>(
+impl NetDeviceState {
+    #[inline]
+    pub(crate) fn name(&self) -> &String {
+        &self.name
+    }
+
+    #[inline]
+    pub(crate) fn is_open(&self) -> bool {
+        self.is_open
+    }
+
+    #[inline]
+    pub(crate) fn ifaces(&self) -> &[NetIface] {
+        &self.ifaces
+    }
+}
+
+pub(crate) fn input_to_app(
     typ: NetProtocolType,
     data: &[u8],
-    dev: &D,
+    dev: &NetDeviceContainer,
 ) -> Result<(), NetDeviceError> {
     dbg!("net_input: type={typ:?}, len={}", data.len());
 
@@ -181,7 +270,7 @@ pub(crate) fn input_to_app<D: NetDevice>(
 
     for proto in &TCP_IP_APP.get().unwrap().protocols {
         if proto.typ() == typ {
-            proto.handle(data, dev);
+            proto.handle(data, dev)?;
 
             return Ok(());
         }

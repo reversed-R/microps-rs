@@ -2,6 +2,7 @@ use std::fmt::Debug;
 
 use crate::{
     dbg,
+    interfaces::NetIface,
     print::debugdump,
     protocols::{AsHost, NetProtocol, NetProtocolError, NetProtocolType},
 };
@@ -23,7 +24,7 @@ impl NetProtocol for IpProtocol {
     fn handle(
         &self,
         data: &[u8],
-        dev: &dyn crate::devices::NetDevice,
+        dev: &crate::net::NetDeviceContainer,
     ) -> Result<(), NetProtocolError> {
         dbg!("handling ip packet...");
         debugdump(data);
@@ -59,6 +60,24 @@ impl NetProtocol for IpProtocol {
                 return Err(NetProtocolError::FragmentUnsurpported);
             }
 
+            for i in dev.ifaces() {
+                match i {
+                    NetIface::Ip(ip_iface) => {
+                        dbg!("ip iface processing starts...");
+                        let payload = &data[hdr.hlen()..hdr.total()];
+                        ip_iface.handle(hdr, payload)?;
+
+                        return Ok(());
+                    }
+                    _ => {
+                        continue;
+                    }
+                }
+            }
+
+            dbg!("ip iface not found and packet ignored.");
+            println!("dev={dev:?}");
+
             Ok(())
         } else {
             Err(NetProtocolError::TooShortPacket { len: data.len() })
@@ -70,7 +89,7 @@ impl NetProtocol for IpProtocol {
 ///
 /// WARN: Multi byte fields are network byte order (big endian).
 #[repr(C)]
-struct IpHeader {
+pub(crate) struct IpHeader {
     /// IP version (4 bits) and Header Length (4 bits).
     /// If a Header Length is N, N * 4 (bytes) is a real header length.
     vhl: u8,
@@ -110,7 +129,12 @@ struct IpHeader {
 const SIZE_OF_IP_HEADER: usize = 20;
 const _: () = assert!(SIZE_OF_IP_HEADER == core::mem::size_of::<IpHeader>());
 
-struct IpAddr(u32);
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) struct IpAddr(u32);
+
+pub(crate) const IP_ADDR_BROADCAST: IpAddr = IpAddr(0xffffffff);
+pub(crate) const IP_ADDR_LOOPBACK: IpAddr = IpAddr(0x7f000001);
+pub(crate) const IP_ADDR_LOOPBACK_NETMASK: IpAddr = IpAddr(0xff000000);
 
 impl Debug for IpAddr {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -206,28 +230,36 @@ impl IpHeader {
     }
 
     #[inline]
-    fn src(&self) -> IpAddr {
+    pub(crate) fn src(&self) -> IpAddr {
         IpAddr(self.src.as_host())
     }
 
     #[inline]
-    fn dst(&self) -> IpAddr {
+    pub(crate) fn dst(&self) -> IpAddr {
         IpAddr(self.dst.as_host())
     }
 }
 
 fn cksum16(data: &[u16], init: u32) -> u16 {
     let mut sum: u32 = init;
-    for idx in 1..data.len() {
-        let idx = idx - 1;
-        sum += data[idx] as u32;
-    }
-    if !data.is_empty() {
-        sum += (data[data.len() - 1] >> 8) as u32;
+    for w in data {
+        sum += *w as u32;
     }
     while sum >> 16 != 0 {
         sum = (sum & 0xffff) + (sum >> 16);
     }
 
     !(sum as u16)
+}
+
+impl From<u32> for IpAddr {
+    fn from(value: u32) -> Self {
+        Self(value)
+    }
+}
+
+impl IpAddr {
+    pub(crate) fn broadcast(unicast: Self, netmask: Self) -> Self {
+        Self((unicast.0 & netmask.0) | !netmask.0)
+    }
 }

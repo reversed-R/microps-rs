@@ -1,6 +1,10 @@
 use std::fmt::Debug;
 
-use crate::{TcpIpError, protocols::NetProtocolType};
+use crate::{
+    TcpIpError,
+    net::NetDeviceContainer,
+    protocols::{NetProtocolError, NetProtocolType},
+};
 
 mod loopback;
 
@@ -9,12 +13,20 @@ pub use loopback::LoopbackDevice;
 pub(crate) trait NetDevice: Debug + Send + Sync + 'static {
     fn info(&self) -> &NetDeviceInner;
     fn open(&self) -> Result<(), NetDeviceError>;
-    fn output(&self, typ: NetProtocolType, data: &[u8], dst: ()) -> Result<(), NetDeviceError>;
+    fn output(
+        &self,
+        typ: NetProtocolType,
+        data: &[u8],
+        dst: (),
+        dev: &NetDeviceContainer, // self が含まれるdevice container
+    ) -> Result<(), NetDeviceError>;
     fn close(&self) -> Result<(), NetDeviceError>;
 }
 
 #[derive(Debug, Clone)]
-pub(crate) enum NetDeviceError {}
+pub(crate) enum NetDeviceError {
+    ProtocolError { err: NetProtocolError },
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum NetDeviceType {
@@ -25,7 +37,7 @@ enum NetDeviceType {
 
 impl From<NetDeviceError> for TcpIpError {
     fn from(value: NetDeviceError) -> Self {
-        todo!()
+        Self::DeviceError { error: value }
     }
 }
 
