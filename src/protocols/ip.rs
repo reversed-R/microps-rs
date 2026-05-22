@@ -2,9 +2,13 @@ use std::fmt::Debug;
 
 use crate::{
     dbg,
+    devices::HardwareAddr,
     interfaces::NetIface,
+    net::select_ip_device,
     print::debugdump,
-    protocols::{AsHost, NetProtocol, NetProtocolError, NetProtocolType},
+    protocols::{
+        AsHost, AsNet, NetProtocol, NetProtocolError, NetProtocolOutputError, NetProtocolType,
+    },
 };
 
 #[derive(Debug, Clone)]
@@ -129,6 +133,7 @@ pub(crate) struct IpAddr(u32);
 pub(crate) const IP_ADDR_BROADCAST: IpAddr = IpAddr(0xffffffff);
 pub(crate) const IP_ADDR_LOOPBACK: IpAddr = IpAddr(0x7f000001);
 pub(crate) const IP_ADDR_LOOPBACK_NETMASK: IpAddr = IpAddr(0xff000000);
+pub(crate) const IP_ADDR_ANY: IpAddr = IpAddr(0x00000000);
 
 impl Debug for IpAddr {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -180,6 +185,40 @@ impl Debug for IpHeader {
 }
 
 impl IpHeader {
+    fn new(
+        protocol: IpUpperProtocol,
+        offset: u16,
+        src: &IpAddr,
+        dst: &IpAddr,
+        data: &[u8],
+    ) -> Self {
+        let hlen = SIZE_OF_IP_HEADER;
+        let total = hlen + data.len();
+        let id = crate::platform::random16();
+
+        let hdr = Self {
+            vhl: (IP_VERSION_IPV4 << 4 | (SIZE_OF_IP_HEADER as u8 >> 2)),
+            tos: 0,
+            total: (total as u16).as_net(),
+            id: id.as_net(),
+            offset: offset.as_net(),
+            ttl: 0xff,
+            protocol: protocol as u8,
+            sum: 0,
+            src: src.0.as_net(),
+            dst: dst.0.as_net(),
+        };
+
+        // temporalily interprets IP header as bytes to calculate checksum
+        let hdr_bytes: [u8; SIZE_OF_IP_HEADER] = unsafe { core::mem::transmute(hdr) };
+        let sum = cksum16_from_bytes(&hdr_bytes, 0);
+
+        let mut hdr: IpHeader = unsafe { core::mem::transmute(hdr_bytes) };
+        hdr.sum = sum.as_net();
+
+        hdr
+    }
+
     #[inline]
     fn version(&self) -> u8 {
         self.vhl >> 4
@@ -264,4 +303,84 @@ impl IpAddr {
     pub(crate) fn broadcast(unicast: Self, netmask: Self) -> Self {
         Self((unicast.0 & netmask.0) | !netmask.0)
     }
+
+    pub(crate) fn is_same_subnet(&self, other: &Self, netmask: &Self) -> bool {
+        self.0 & netmask.0 == other.0 & netmask.0
+    }
+}
+
+#[repr(u8)]
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum IpUpperProtocol {
+    Hopopt = 0,
+    Icmp = 1,
+    Igmp = 2,
+    IpV4 = 4,
+    Tcp = 6,
+    Udp = 17,
+}
+
+#[repr(C)]
+struct IpPacket<'p> {
+    header: IpHeader,
+    payload: &'p [u8],
+}
+
+pub(crate) fn output(
+    protocol: IpUpperProtocol,
+    data: &[u8],
+    src: IpAddr,
+    dst: IpAddr,
+) -> Result<(), NetProtocolOutputError> {
+    if src == IP_ADDR_ANY {
+        todo!("ip routing not implemented")
+    }
+
+    let (dev, netmask) = select_ip_device(&src).expect("device not found");
+    if !src.is_same_subnet(&dst, &netmask) && dst != IP_ADDR_BROADCAST {
+        todo!("unreachable. {dst:?}");
+    }
+
+    let dev_info = dev.dev().info();
+    if (dev_info.mtu() as usize) < SIZE_OF_IP_HEADER + data.len() {
+        todo!(
+            "data is bigger than MTU. mtu={} < {}",
+            dev_info.mtu(),
+            SIZE_OF_IP_HEADER + data.len()
+        );
+    }
+
+    let header = IpHeader::new(protocol, 0, &src, &dst, data);
+
+    dbg!("ip::output: \n{:?}", header);
+
+    let packet = IpPacket {
+        header,
+        payload: data,
+    };
+
+    output_from_device(packet, dev)
+}
+
+fn output_from_device(
+    packet: IpPacket,
+    dev: &crate::net::NetDeviceContainer,
+) -> Result<(), NetProtocolOutputError> {
+    let dst_bytes = packet.header.dst.to_ne_bytes();
+    let dst_hwaddr = HardwareAddr::new(&dst_bytes);
+
+    // FIXME: buffer size now hard coded as MTU 1500
+    let mut data = [0u8; 1500];
+    let header_bytes: [u8; SIZE_OF_IP_HEADER] = unsafe { core::mem::transmute(packet.header) };
+
+    data[0..SIZE_OF_IP_HEADER].copy_from_slice(&header_bytes);
+    data[SIZE_OF_IP_HEADER..SIZE_OF_IP_HEADER + packet.payload.len()]
+        .copy_from_slice(packet.payload);
+
+    dev.output(
+        NetProtocolType::Ip,
+        &data[..SIZE_OF_IP_HEADER + packet.payload.len()],
+        &dst_hwaddr,
+    )
+    .map_err(|e| NetProtocolOutputError::TcpIpError { error: Box::new(e) })
 }

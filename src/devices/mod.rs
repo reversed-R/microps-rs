@@ -17,7 +17,7 @@ pub(crate) trait NetDevice: Debug + Send + Sync + 'static {
         &self,
         typ: NetProtocolType,
         data: &[u8],
-        dst: (),
+        dst: &HardwareAddr<'_>,
         dev: &NetDeviceContainer, // self が含まれるdevice container
     ) -> Result<(), NetDeviceError>;
     fn close(&self) -> Result<(), NetDeviceError>;
@@ -38,6 +38,14 @@ enum NetDeviceType {
 impl From<NetDeviceError> for TcpIpError {
     fn from(value: NetDeviceError) -> Self {
         Self::DeviceError { error: value }
+    }
+}
+
+pub(crate) struct HardwareAddr<'a>(&'a [u8]);
+
+impl<'a> HardwareAddr<'a> {
+    pub(crate) fn new(addr: &'a [u8]) -> Self {
+        Self(addr)
     }
 }
 

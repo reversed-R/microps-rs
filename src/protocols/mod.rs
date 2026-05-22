@@ -1,8 +1,10 @@
-mod ip;
+pub(crate) mod ip;
 
 use std::fmt::Debug;
 
-use crate::{devices::NetDeviceError, interfaces::NetIfaceError, net::NetDeviceContainer};
+use crate::{
+    TcpIpError, devices::NetDeviceError, interfaces::NetIfaceError, net::NetDeviceContainer,
+};
 
 pub(crate) use ip::{
     IP_ADDR_BROADCAST, IP_ADDR_LOOPBACK, IP_ADDR_LOOPBACK_NETMASK, IpAddr, IpHeader, IpProtocol,
@@ -32,6 +34,12 @@ pub(crate) enum NetProtocolError {
     BrokenCheckSum,
     FragmentUnsurpported,
     IfaceError { error: NetIfaceError },
+}
+
+#[derive(Debug, Clone)]
+pub(crate) enum NetProtocolOutputError {
+    TcpIpError { error: Box<TcpIpError> },
+    DeviceError { error: Box<NetDeviceError> },
 }
 
 impl From<NetProtocolError> for NetDeviceError {

@@ -20,6 +20,21 @@ impl IpIface {
         }
     }
 
+    #[inline]
+    pub(crate) fn unicast(&self) -> &IpAddr {
+        &self.unicast
+    }
+
+    #[inline]
+    pub(crate) fn netmask(&self) -> &IpAddr {
+        &self.netmask
+    }
+
+    #[inline]
+    pub(crate) fn broadcast(&self) -> &IpAddr {
+        &self.broadcast
+    }
+
     pub(crate) fn handle(&self, hdr: IpHeader, payload: &[u8]) -> Result<(), NetIfaceError> {
         // packet filtering
         if hdr.dst() == self.unicast

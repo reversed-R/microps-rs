@@ -43,7 +43,7 @@ impl NetDevice for LoopbackDevice {
         &self,
         typ: crate::protocols::NetProtocolType,
         data: &[u8],
-        dst: (),
+        dst: &super::HardwareAddr<'_>,
         dev: &crate::net::NetDeviceContainer,
     ) -> Result<(), super::NetDeviceError> {
         info!("loopback device: type={typ:?}, len={}", data.len());
