@@ -240,7 +240,7 @@ fn cksum16_from_bytes(data: &[u8], init: u32) -> u16 {
     let word_len = data.len() / 2;
     for widx in 0..word_len {
         let idx = widx * 2;
-        sum += u16::from_be_bytes(data[idx..=idx + 1].try_into().unwrap()) as u32;
+        sum += (((data[idx] as u16) << 8) + data[idx + 1] as u16) as u32;
     }
 
     // 最後のbyteがあれば計算
