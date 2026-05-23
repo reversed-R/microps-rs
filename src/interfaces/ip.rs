@@ -1,8 +1,4 @@
-use crate::{
-    dbg,
-    interfaces::NetIfaceError,
-    protocols::{IP_ADDR_BROADCAST, IpAddr, IpHeader},
-};
+use crate::protocols::{IP_ADDR_BROADCAST, IpAddr, IpHeader};
 
 #[derive(Debug)]
 pub(crate) struct IpIface {
@@ -35,19 +31,7 @@ impl IpIface {
         &self.broadcast
     }
 
-    pub(crate) fn handle(&self, hdr: IpHeader, payload: &[u8]) -> Result<(), NetIfaceError> {
-        // packet filtering
-        if hdr.dst() == self.unicast
-            || hdr.dst() == self.broadcast
-            || hdr.dst() == IP_ADDR_BROADCAST
-        {
-            // for me
-            dbg!("ip packet for me filtered!");
-            Ok(())
-        } else {
-            // ignore: for other hosts
-            dbg!("ip packet for other hosts ignored.");
-            Ok(())
-        }
+    pub(crate) fn should_proceed_packet(&self, hdr: &IpHeader) -> bool {
+        hdr.dst() == self.unicast || hdr.dst() == self.broadcast || hdr.dst() == IP_ADDR_BROADCAST
     }
 }

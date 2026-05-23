@@ -34,6 +34,8 @@ pub(crate) enum NetProtocolError {
     BrokenCheckSum,
     FragmentUnsurpported,
     IfaceError { error: NetIfaceError },
+    DuplicatedUpperProtocol { proto: ip::IpUpperProtocolType },
+    IpProtocolError { error: ip::IpProtocolError },
 }
 
 #[derive(Debug, Clone)]

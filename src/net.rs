@@ -32,7 +32,12 @@ pub fn tcp_ip_run() -> Result<(), TcpIpError> {
     let loopback_dev = crate::devices::LoopbackDevice::new();
     tcp_ip_app.register_net_device(Box::new(loopback_dev));
 
-    let ip_proto = IpProtocol::new();
+    let mut ip_proto = IpProtocol::new();
+    ip_proto
+        .register_protocol(crate::protocols::ip::IpUpperProtocol::Icmp(
+            crate::protocols::ip::icmp::IcmpProtocol,
+        ))
+        .unwrap();
     tcp_ip_app.register_net_protocol(ip_proto);
 
     tcp_ip_app.register_net_iface_on_device(
@@ -105,7 +110,7 @@ impl TcpIpApp {
         let dst = src;
         while !self.terminated.load(Ordering::Relaxed) {
             crate::protocols::ip::output(
-                crate::protocols::ip::IpUpperProtocol::Icmp,
+                crate::protocols::ip::IpUpperProtocolType::Icmp,
                 &TEST_DATA[20..],
                 src,
                 dst,

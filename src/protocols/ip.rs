@@ -1,3 +1,5 @@
+pub(crate) mod icmp;
+
 use std::fmt::Debug;
 
 use crate::{
@@ -12,11 +14,32 @@ use crate::{
 };
 
 #[derive(Debug, Clone)]
-pub(crate) struct IpProtocol;
+pub(crate) struct IpProtocol {
+    protocols: Vec<IpUpperProtocol>,
+}
 
 impl IpProtocol {
     pub(crate) fn new() -> Self {
-        Self
+        Self {
+            protocols: Vec::new(),
+        }
+    }
+
+    pub(crate) fn register_protocol(
+        &mut self,
+        protocol: IpUpperProtocol,
+    ) -> Result<(), NetProtocolError> {
+        for proto in &self.protocols {
+            if proto.protocol_type() == protocol.protocol_type() {
+                return Err(NetProtocolError::DuplicatedUpperProtocol {
+                    proto: proto.protocol_type(),
+                });
+            }
+        }
+
+        self.protocols.push(protocol);
+
+        Ok(())
     }
 }
 
@@ -61,11 +84,32 @@ impl NetProtocol for IpProtocol {
             for i in dev.state().ifaces() {
                 match i {
                     NetIface::Ip(ip_iface) => {
-                        dbg!("ip iface processing starts...");
                         let payload = &data[hdr.hlen()..hdr.total()];
-                        ip_iface.handle(hdr, payload)?;
 
-                        return Ok(());
+                        if ip_iface.should_proceed_packet(&hdr) {
+                            dbg!("ip packet for me filtered!");
+
+                            let proto = IpUpperProtocolType::try_from(hdr.protocol)
+                                .map_err(|error| NetProtocolError::IpProtocolError { error })?;
+
+                            for p_handler in &self.protocols {
+                                if proto == p_handler.protocol_type() {
+                                    match p_handler {
+                                        IpUpperProtocol::Icmp(handler) => {
+                                            handler.handle(hdr, payload, ip_iface).map_err(
+                                                |error| NetProtocolError::IpProtocolError { error },
+                                            )?;
+                                        }
+                                    }
+
+                                    return Ok(());
+                                }
+                            }
+
+                            return Ok(());
+                        } else {
+                            dbg!("ip packet for other hosts ignored.");
+                        }
                     }
                     _ => {
                         continue;
@@ -186,7 +230,7 @@ impl Debug for IpHeader {
 
 impl IpHeader {
     fn new(
-        protocol: IpUpperProtocol,
+        protocol: IpUpperProtocolType,
         offset: u16,
         src: &IpAddr,
         dst: &IpAddr,
@@ -309,15 +353,37 @@ impl IpAddr {
     }
 }
 
+const IP_UPPER_PROTOCOL_HOPOPT: u8 = 0;
+const IP_UPPER_PROTOCOL_ICMP: u8 = 1;
+const IP_UPPER_PROTOCOL_IGMP: u8 = 2;
+const IP_UPPER_PROTOCOL_IPV4: u8 = 4;
+const IP_UPPER_PROTOCOL_TCP: u8 = 6;
+const IP_UPPER_PROTOCOL_UDP: u8 = 17;
+
 #[repr(u8)]
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub(crate) enum IpUpperProtocol {
-    Hopopt = 0,
-    Icmp = 1,
-    Igmp = 2,
-    IpV4 = 4,
-    Tcp = 6,
-    Udp = 17,
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum IpUpperProtocolType {
+    Hopopt = IP_UPPER_PROTOCOL_HOPOPT,
+    Icmp = IP_UPPER_PROTOCOL_ICMP,
+    Igmp = IP_UPPER_PROTOCOL_IGMP,
+    IpV4 = IP_UPPER_PROTOCOL_IPV4,
+    Tcp = IP_UPPER_PROTOCOL_TCP,
+    Udp = IP_UPPER_PROTOCOL_UDP,
+}
+
+impl TryFrom<u8> for IpUpperProtocolType {
+    type Error = IpProtocolError;
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        match value {
+            IP_UPPER_PROTOCOL_HOPOPT => Ok(Self::Hopopt),
+            IP_UPPER_PROTOCOL_ICMP => Ok(Self::Icmp),
+            IP_UPPER_PROTOCOL_IGMP => Ok(Self::Igmp),
+            IP_UPPER_PROTOCOL_IPV4 => Ok(Self::IpV4),
+            IP_UPPER_PROTOCOL_TCP => Ok(Self::Tcp),
+            IP_UPPER_PROTOCOL_UDP => Ok(Self::Udp),
+            _ => Err(IpProtocolError::UnsurpportedProtocol { proto: value }),
+        }
+    }
 }
 
 #[repr(C)]
@@ -327,7 +393,7 @@ struct IpPacket<'p> {
 }
 
 pub(crate) fn output(
-    protocol: IpUpperProtocol,
+    protocol: IpUpperProtocolType,
     data: &[u8],
     src: IpAddr,
     dst: IpAddr,
@@ -383,4 +449,32 @@ fn output_from_device(
         &dst_hwaddr,
     )
     .map_err(|e| NetProtocolOutputError::TcpIpError { error: Box::new(e) })
+}
+
+#[derive(Debug, Clone)]
+pub(crate) enum IpUpperProtocol {
+    Icmp(icmp::IcmpProtocol),
+}
+
+pub(crate) trait IpUpperProtocolHandler: Debug + Send + Sync + 'static {
+    fn protocol(&self) -> &IpUpperProtocolType;
+    fn handle(
+        &self,
+        hdr: IpHeader,
+        payload: &[u8],
+        iface: &crate::interfaces::IpIface,
+    ) -> Result<(), IpProtocolError>;
+}
+
+#[derive(Debug, Clone)]
+pub(crate) enum IpProtocolError {
+    UnsurpportedProtocol { proto: u8 },
+}
+
+impl IpUpperProtocol {
+    fn protocol_type(&self) -> IpUpperProtocolType {
+        match self {
+            Self::Icmp(_) => IpUpperProtocolType::Icmp,
+        }
+    }
 }
