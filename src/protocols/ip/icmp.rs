@@ -1,4 +1,7 @@
-use crate::{dbg, protocols::ip::IpUpperProtocolHandler};
+use crate::{
+    dbg,
+    protocols::{IpAddr, NetProtocolOutputError, ip::IpUpperProtocolHandler},
+};
 
 #[derive(Debug, Clone)]
 pub(crate) struct IcmpProtocol;
@@ -10,7 +13,7 @@ impl IpUpperProtocolHandler for IcmpProtocol {
 
     fn handle(
         &self,
-        hdr: super::IpHeader,
+        ip_hdr: super::IpHeader,
         payload: &[u8],
         iface: &crate::interfaces::IpIface,
     ) -> Result<(), super::IpProtocolError> {
@@ -28,7 +31,32 @@ impl IpUpperProtocolHandler for IcmpProtocol {
             });
         }
 
-        Ok(())
+        let hdr_bytes: [u8; SIZE_OF_ICMP_HEADER] =
+            payload[..SIZE_OF_ICMP_HEADER].try_into().unwrap();
+        let hdr: IcmpHeader = unsafe { core::mem::transmute(hdr_bytes) };
+
+        match hdr.common.typ {
+            ICMP_TYPE_ECHO => {
+                dbg!("ICMP ECHO handling...");
+
+                output(
+                    IcmpType::EchoReply,
+                    IcmpCode::try_from(hdr.common.code)
+                        .map_err(|error| super::IpProtocolError::IcmpError { error })?,
+                    hdr.dep,
+                    &payload[SIZE_OF_ICMP_HEADER..],
+                    *iface.unicast(),
+                    ip_hdr.src(),
+                )
+                .map_err(|error| super::IpProtocolError::IcmpOutputError { error })
+            }
+
+            x => {
+                // TODO:
+                dbg!("ICMP type={}", x);
+                Ok(())
+            }
+        }
     }
 }
 
@@ -36,6 +64,7 @@ impl IpUpperProtocolHandler for IcmpProtocol {
 pub(crate) enum IcmpError {
     TooShortPacket { len: usize },
     BrokenCheckSum,
+    UnsurpportedCode { code: u8 },
 }
 
 #[repr(C)]
@@ -70,6 +99,56 @@ const ICMP_TYPE_TIMESTAMP_REPLY: u8 = 14;
 const ICMP_TYPE_INFO_REQUEST: u8 = 15;
 const ICMP_TYPE_INFO_REPLY: u8 = 16;
 
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum IcmpType {
+    EchoReply = ICMP_TYPE_ECHO_REPLY,
+    DestUnreach = ICMP_TYPE_DEST_UNREACH,
+    SourceQuench = ICMP_TYPE_SOURCE_QUENCH,
+    Redirect = ICMP_TYPE_REDIRECT,
+    Echo = ICMP_TYPE_ECHO,
+    TimeExceeded = ICMP_TYPE_TIME_EXCEEDED,
+    ParamProblem = ICMP_TYPE_PARAM_PROBLEM,
+    Timestamp = ICMP_TYPE_TIMESTAMP,
+    TimestampReply = ICMP_TYPE_TIMESTAMP_REPLY,
+    InfoRequest = ICMP_TYPE_INFO_REQUEST,
+    InfoReply = ICMP_TYPE_INFO_REPLY,
+}
+
+const ICMP_CODE_NET_UNREACH: u8 = 0;
+const ICMP_CODE_HOST_UNREACH: u8 = 1;
+const ICMP_CODE_PROTO_UNREACH: u8 = 2;
+const ICMP_CODE_PORT_UNREACH: u8 = 3;
+const ICMP_CODE_FRAGMENT_NEEDED: u8 = 4;
+const ICMP_CODE_SOURCE_ROUTE_FAILED: u8 = 5;
+
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum IcmpCode {
+    NetUnreach = ICMP_CODE_NET_UNREACH,
+    HostUnreach = ICMP_CODE_HOST_UNREACH,
+    ProtoUnreach = ICMP_CODE_PROTO_UNREACH,
+    PortUnreach = ICMP_CODE_PORT_UNREACH,
+    FragmentNeeded = ICMP_CODE_FRAGMENT_NEEDED,
+    SourceRouteFailed = ICMP_CODE_SOURCE_ROUTE_FAILED,
+}
+
+impl TryFrom<u8> for IcmpCode {
+    type Error = IcmpError;
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        match value {
+            ICMP_CODE_NET_UNREACH => Ok(Self::NetUnreach),
+            ICMP_CODE_HOST_UNREACH => Ok(Self::HostUnreach),
+            ICMP_CODE_PROTO_UNREACH => Ok(Self::ProtoUnreach),
+            ICMP_CODE_PORT_UNREACH => Ok(Self::PortUnreach),
+            ICMP_CODE_FRAGMENT_NEEDED => Ok(Self::FragmentNeeded),
+            ICMP_CODE_SOURCE_ROUTE_FAILED => Ok(Self::SourceRouteFailed),
+            _ => Err(IcmpError::UnsurpportedCode { code: value }),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 struct IcmpHeaderEcho {
     common: IcmpHeaderCommon,
@@ -83,4 +162,45 @@ struct IcmpHeaderUnreach {
 
     /// unused (zero)
     unused: u32,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) enum IcmpOutputError {
+    NetProtocolOutputError { error: NetProtocolOutputError },
+}
+
+pub(crate) fn output(
+    typ: IcmpType,
+    code: IcmpCode,
+    val: [u8; 4],
+    data: &[u8],
+    src: IpAddr,
+    dst: IpAddr,
+) -> Result<(), IcmpOutputError> {
+    // FIXME: buffer size now hard coded as MTU 1500
+    let mut buf = [0u8; 1500];
+    let len = SIZE_OF_ICMP_HEADER + data.len();
+
+    let hdr = IcmpHeader {
+        common: IcmpHeaderCommon {
+            typ: typ as u8,
+            code: code as u8,
+            sum: 0,
+        },
+        dep: val,
+    };
+
+    buf[..SIZE_OF_ICMP_HEADER].copy_from_slice(&unsafe {
+        core::mem::transmute::<IcmpHeader, [u8; SIZE_OF_ICMP_HEADER]>(hdr)
+    });
+    buf[SIZE_OF_ICMP_HEADER..len].copy_from_slice(data);
+
+    // calculate check sum and set
+    let sum = super::cksum16_from_bytes(&buf[..len], 0);
+    let sum_bytes = sum.to_be_bytes();
+    buf[2] = sum_bytes[0];
+    buf[3] = sum_bytes[1];
+
+    super::output(super::IpUpperProtocolType::Icmp, &buf[..len], src, dst)
+        .map_err(|error| IcmpOutputError::NetProtocolOutputError { error })
 }

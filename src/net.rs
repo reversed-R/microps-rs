@@ -108,17 +108,32 @@ impl TcpIpApp {
 
         let src = IP_ADDR_LOOPBACK;
         let dst = src;
+
+        let id = crate::platform::random16();
+        let mut seq = 0u16;
         while !self.terminated.load(Ordering::Relaxed) {
-            crate::protocols::ip::output(
-                crate::protocols::ip::IpUpperProtocolType::Icmp,
-                &TEST_DATA[20..],
+            // crate::protocols::ip::output(
+            //     crate::protocols::ip::IpUpperProtocolType::Icmp,
+            //     &TEST_DATA[20..],
+            //     src,
+            //     dst,
+            // )
+            // .unwrap();
+
+            seq += 1;
+            let seq_bytes = seq.to_be_bytes();
+            let id_bytes = id.to_be_bytes();
+            let val = [id_bytes[0], id_bytes[1], seq_bytes[0], seq_bytes[1]];
+
+            crate::protocols::ip::icmp::output(
+                crate::protocols::ip::icmp::IcmpType::Echo,
+                crate::protocols::ip::icmp::IcmpCode::NetUnreach,
+                val,
+                &[0x54, 0x45, 0x53, 0x54], // 'T', 'E', 'S', 'T'
                 src,
                 dst,
             )
             .unwrap();
-            // for dev in &self.devices {
-            //     dev.output(NetProtocolType::Ip, TEST_DATA, ())?;
-            // }
         }
 
         // cleanup

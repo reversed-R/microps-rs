@@ -10,7 +10,7 @@ use crate::{
     print::debugdump,
     protocols::{
         AsHost, AsNet, NetProtocol, NetProtocolError, NetProtocolOutputError, NetProtocolType,
-        ip::icmp::IcmpError,
+        ip::icmp::{IcmpError, IcmpOutputError},
     },
 };
 
@@ -120,6 +120,21 @@ impl NetProtocol for IpProtocol {
 
             dbg!("ip iface not found and packet ignored.");
             println!("dev={dev:?}");
+
+            if hdr.hlen() + 8 < hdr.total() {
+                // desitination unreachable ICMP error message
+                icmp::output(
+                    icmp::IcmpType::DestUnreach,
+                    icmp::IcmpCode::ProtoUnreach,
+                    [0; _],
+                    data,
+                    hdr.dst(),
+                    hdr.src(),
+                )
+                .map_err(|error| NetProtocolError::IpProtocolError {
+                    error: IpProtocolError::IcmpOutputError { error },
+                })?;
+            }
 
             Ok(())
         } else {
@@ -471,6 +486,7 @@ pub(crate) trait IpUpperProtocolHandler: Debug + Send + Sync + 'static {
 pub(crate) enum IpProtocolError {
     UnsurpportedProtocol { proto: u8 },
     IcmpError { error: IcmpError },
+    IcmpOutputError { error: IcmpOutputError },
 }
 
 impl IpUpperProtocol {
