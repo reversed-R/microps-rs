@@ -10,6 +10,7 @@ use crate::{
     print::debugdump,
     protocols::{
         AsHost, AsNet, NetProtocol, NetProtocolError, NetProtocolOutputError, NetProtocolType,
+        ip::icmp::IcmpError,
     },
 };
 
@@ -469,6 +470,7 @@ pub(crate) trait IpUpperProtocolHandler: Debug + Send + Sync + 'static {
 #[derive(Debug, Clone)]
 pub(crate) enum IpProtocolError {
     UnsurpportedProtocol { proto: u8 },
+    IcmpError { error: IcmpError },
 }
 
 impl IpUpperProtocol {
