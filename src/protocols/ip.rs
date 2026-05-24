@@ -107,6 +107,23 @@ impl NetProtocol for IpProtocol {
                                 }
                             }
 
+                            if hdr.hlen() + 8 < hdr.total() {
+                                // desitination unreachable ICMP error message
+                                icmp::output(
+                                    icmp::IcmpType::DestUnreach,
+                                    icmp::IcmpCode::ProtoUnreach,
+                                    [0; _],
+                                    data,
+                                    hdr.dst(),
+                                    hdr.src(),
+                                )
+                                .map_err(|error| {
+                                    NetProtocolError::IpProtocolError {
+                                        error: IpProtocolError::IcmpOutputError { error },
+                                    }
+                                })?;
+                            }
+
                             return Ok(());
                         } else {
                             dbg!("ip packet for other hosts ignored.");
@@ -120,21 +137,6 @@ impl NetProtocol for IpProtocol {
 
             dbg!("ip iface not found and packet ignored.");
             println!("dev={dev:?}");
-
-            if hdr.hlen() + 8 < hdr.total() {
-                // desitination unreachable ICMP error message
-                icmp::output(
-                    icmp::IcmpType::DestUnreach,
-                    icmp::IcmpCode::ProtoUnreach,
-                    [0; _],
-                    data,
-                    hdr.dst(),
-                    hdr.src(),
-                )
-                .map_err(|error| NetProtocolError::IpProtocolError {
-                    error: IpProtocolError::IcmpOutputError { error },
-                })?;
-            }
 
             Ok(())
         } else {
@@ -199,6 +201,23 @@ impl Debug for IpAddr {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let bytes = self.0.to_be_bytes();
         write!(f, "{}.{}.{}.{}", bytes[0], bytes[1], bytes[2], bytes[3])
+    }
+}
+
+impl IpAddr {
+    pub(crate) fn new(addr: u32) -> Self {
+        Self(addr)
+    }
+}
+
+impl From<[u8; 4]> for IpAddr {
+    fn from(value: [u8; 4]) -> Self {
+        Self(
+            ((value[0] as u32) << 24)
+                + ((value[1] as u32) << 16)
+                + ((value[2] as u32) << 8)
+                + (value[3] as u32),
+        )
     }
 }
 
@@ -414,6 +433,8 @@ pub(crate) fn output(
     src: IpAddr,
     dst: IpAddr,
 ) -> Result<(), NetProtocolOutputError> {
+    dbg!("ip output... src={:?}, dst={:?}", src, dst);
+
     if src == IP_ADDR_ANY {
         todo!("ip routing not implemented")
     }
@@ -423,11 +444,11 @@ pub(crate) fn output(
         todo!("unreachable. {dst:?}");
     }
 
-    let dev_info = dev.dev().info();
-    if (dev_info.mtu() as usize) < SIZE_OF_IP_HEADER + data.len() {
+    let mtu = dev.dev().info().mtu();
+    if (mtu as usize) < SIZE_OF_IP_HEADER + data.len() {
         todo!(
             "data is bigger than MTU. mtu={} < {}",
-            dev_info.mtu(),
+            mtu,
             SIZE_OF_IP_HEADER + data.len()
         );
     }
@@ -448,8 +469,7 @@ fn output_from_device(
     packet: IpPacket,
     dev: &crate::net::NetDeviceContainer,
 ) -> Result<(), NetProtocolOutputError> {
-    let dst_bytes = packet.header.dst.to_ne_bytes();
-    let dst_hwaddr = HardwareAddr::new(&dst_bytes);
+    let dummy_dst_hwaddr = HardwareAddr::new(Vec::new());
 
     // FIXME: buffer size now hard coded as MTU 1500
     let mut data = [0u8; 1500];
@@ -462,7 +482,7 @@ fn output_from_device(
     dev.output(
         NetProtocolType::Ip,
         &data[..SIZE_OF_IP_HEADER + packet.payload.len()],
-        &dst_hwaddr,
+        &dummy_dst_hwaddr,
     )
     .map_err(|e| NetProtocolOutputError::TcpIpError { error: Box::new(e) })
 }

@@ -1,6 +1,8 @@
+use std::fmt::Debug;
+
 use crate::{
     dbg,
-    protocols::{IpAddr, NetProtocolOutputError, ip::IpUpperProtocolHandler},
+    protocols::{AsHost, IpAddr, NetProtocolOutputError, ip::IpUpperProtocolHandler},
 };
 
 #[derive(Debug, Clone)]
@@ -169,6 +171,27 @@ pub(crate) enum IcmpOutputError {
     NetProtocolOutputError { error: NetProtocolOutputError },
 }
 
+impl Debug for IcmpHeader {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            r#"IcmpHeader{{
+    typ: {:?},
+    code: {:?},
+    sum: {},
+    dep: [{}, {}, {}, {}]
+}}"#,
+            self.common.typ,
+            self.common.code,
+            self.common.sum,
+            self.dep[0],
+            self.dep[1],
+            self.dep[2],
+            self.dep[3]
+        )
+    }
+}
+
 pub(crate) fn output(
     typ: IcmpType,
     code: IcmpCode,
@@ -189,6 +212,9 @@ pub(crate) fn output(
         },
         dep: val,
     };
+
+    dbg!("icmp output... src={:?}, dst={:?}", src, dst);
+    dbg!("{:?}", hdr);
 
     buf[..SIZE_OF_ICMP_HEADER].copy_from_slice(&unsafe {
         core::mem::transmute::<IcmpHeader, [u8; SIZE_OF_ICMP_HEADER]>(hdr)

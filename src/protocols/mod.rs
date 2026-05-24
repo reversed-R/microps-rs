@@ -63,11 +63,11 @@ impl TryFrom<u16> for NetProtocolType {
     }
 }
 
-trait AsHost<T> {
+pub(crate) trait AsHost<T> {
     fn as_host(&self) -> T;
 }
 
-trait AsNet<T> {
+pub(crate) trait AsNet<T> {
     fn as_net(&self) -> T;
 }
 

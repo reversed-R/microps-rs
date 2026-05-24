@@ -44,6 +44,13 @@ pub fn tcp_ip_run() -> Result<(), TcpIpError> {
         NetIface::Ip(IpIface::new(IP_ADDR_LOOPBACK, IP_ADDR_LOOPBACK_NETMASK)),
         "net0",
     )?;
+    tcp_ip_app.register_net_iface_on_device(
+        NetIface::Ip(IpIface::new(
+            IpAddr::from([192, 0, 2, 1]),
+            IpAddr::from([255, 255, 255, 0]),
+        )),
+        "net1",
+    )?;
 
     TCP_IP_APP
         .set(Arc::new(tcp_ip_app))
@@ -153,7 +160,7 @@ impl TcpIpApp {
         let dev = dev_init(dev_id);
 
         let dev = NetDeviceContainer {
-            dev: Box::new(dev),
+            dev: Arc::new(RwLock::new(dev)),
             state: Arc::new(RwLock::new(NetDeviceState {
                 name: format!("net{}", self.devices.len()),
                 is_open: false,
@@ -197,7 +204,7 @@ impl TcpIpApp {
 
 #[derive(Debug)]
 pub(crate) struct NetDeviceContainer {
-    dev: Box<dyn NetDevice>,
+    dev: Arc<RwLock<dyn NetDevice>>,
     state: Arc<RwLock<NetDeviceState>>,
 }
 
@@ -220,8 +227,8 @@ impl NetDeviceContainer {
     }
 
     #[inline]
-    pub(crate) fn dev(&self) -> &dyn NetDevice {
-        &*self.dev
+    pub(crate) fn dev(&self) -> RwLockReadGuard<'_, dyn NetDevice> {
+        self.dev.read().unwrap()
     }
 
     #[inline]
@@ -236,7 +243,7 @@ impl NetDeviceContainer {
                 name: self.name().clone(),
             })
         } else {
-            self.dev.open()?;
+            self.dev.write().unwrap().open()?;
             self.state.write().unwrap().is_open = true;
             Ok(())
         }
@@ -249,7 +256,7 @@ impl NetDeviceContainer {
                 name: self.name().clone(),
             })
         } else {
-            self.dev.close()?;
+            self.dev.write().unwrap().close()?;
             self.state.write().unwrap().is_open = false;
             Ok(())
         }
@@ -259,7 +266,7 @@ impl NetDeviceContainer {
         &self,
         typ: NetProtocolType,
         data: &[u8],
-        dst: &crate::devices::HardwareAddr<'_>,
+        dst: &crate::devices::HardwareAddr,
     ) -> Result<(), TcpIpError> {
         dbg!("outputing dev={}", self.name());
         if !self.is_open() {
@@ -267,13 +274,14 @@ impl NetDeviceContainer {
                 name: self.name().clone(),
             })
         } else {
-            if (self.dev.info().mtu() as usize) < data.len() {
+            let mtu = self.dev().info().mtu();
+            if (mtu as usize) < data.len() {
                 Err(TcpIpError::DataLongerThanMTU {
-                    mtu: self.dev.info().mtu(),
+                    mtu,
                     len: data.len(),
                 })
             } else {
-                self.dev.output(typ, data, dst)?;
+                self.dev().output(typ, data, dst)?;
 
                 Ok(())
             }

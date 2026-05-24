@@ -35,7 +35,7 @@ impl NetDevice for LoopbackDevice {
         &self.inner
     }
 
-    fn open(&self) -> Result<(), super::NetDeviceError> {
+    fn open(&mut self) -> Result<(), super::NetDeviceError> {
         dbg!("opening loopback device...");
         Ok(()) // nothing to do
     }
@@ -44,7 +44,7 @@ impl NetDevice for LoopbackDevice {
         &self,
         typ: crate::protocols::NetProtocolType,
         data: &[u8],
-        dst: &super::HardwareAddr<'_>,
+        _dst: &super::HardwareAddr,
     ) -> Result<(), super::NetDeviceError> {
         info!("loopback device: type={typ:?}, len={}", data.len());
 
@@ -53,7 +53,7 @@ impl NetDevice for LoopbackDevice {
         input_to_app(self.inner.dev_id(), typ, data)
     }
 
-    fn close(&self) -> Result<(), super::NetDeviceError> {
+    fn close(&mut self) -> Result<(), super::NetDeviceError> {
         dbg!("closing loopback device...");
         Ok(()) // nothing to do
     }

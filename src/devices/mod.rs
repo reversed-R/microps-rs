@@ -24,14 +24,14 @@ impl DeviceId {
 
 pub(crate) trait NetDevice: Debug + Send + Sync + 'static {
     fn info(&self) -> &NetDeviceInner;
-    fn open(&self) -> Result<(), NetDeviceError>;
+    fn open(&mut self) -> Result<(), NetDeviceError>;
     fn output(
         &self,
         typ: NetProtocolType,
         data: &[u8],
-        dst: &HardwareAddr<'_>,
+        dst: &HardwareAddr,
     ) -> Result<(), NetDeviceError>;
-    fn close(&self) -> Result<(), NetDeviceError>;
+    fn close(&mut self) -> Result<(), NetDeviceError>;
 }
 
 #[derive(Debug, Clone)]
@@ -53,13 +53,21 @@ impl From<NetDeviceError> for TcpIpError {
     }
 }
 
-pub(crate) struct HardwareAddr<'a>(&'a [u8]);
+pub(crate) struct HardwareAddr(Vec<u8>);
 
-impl<'a> HardwareAddr<'a> {
-    pub(crate) fn new(addr: &'a [u8]) -> Self {
+impl HardwareAddr {
+    pub(crate) fn new(addr: Vec<u8>) -> Self {
         Self(addr)
     }
 }
+
+// pub(crate) struct HardwareAddr<'a>(&'a [u8]);
+//
+// impl<'a> HardwareAddr<'a> {
+//     pub(crate) fn new(addr: &'a [u8]) -> Self {
+//         Self(addr)
+//     }
+// }
 
 // const NET_DEVICE_FLAG_UP: u16 = 0b0000_0000_0000_0001;
 pub(crate) const NET_DEVICE_FLAG_LOOPBACK: u16 = 0b0000_0000_0000_0010;
