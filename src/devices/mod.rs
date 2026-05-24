@@ -2,13 +2,25 @@ use std::fmt::Debug;
 
 use crate::{
     TcpIpError,
-    net::NetDeviceContainer,
     protocols::{NetProtocolError, NetProtocolType},
 };
 
-mod loopback;
+pub(crate) mod ethernet;
+pub(crate) mod loopback;
 
-pub use loopback::LoopbackDevice;
+#[repr(transparent)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct DeviceId(usize);
+
+impl DeviceId {
+    pub(crate) fn new(value: usize) -> Self {
+        Self(value)
+    }
+
+    pub(crate) fn value(&self) -> usize {
+        self.0
+    }
+}
 
 pub(crate) trait NetDevice: Debug + Send + Sync + 'static {
     fn info(&self) -> &NetDeviceInner;
@@ -18,7 +30,6 @@ pub(crate) trait NetDevice: Debug + Send + Sync + 'static {
         typ: NetProtocolType,
         data: &[u8],
         dst: &HardwareAddr<'_>,
-        dev: &NetDeviceContainer, // self が含まれるdevice container
     ) -> Result<(), NetDeviceError>;
     fn close(&self) -> Result<(), NetDeviceError>;
 }
@@ -26,10 +37,11 @@ pub(crate) trait NetDevice: Debug + Send + Sync + 'static {
 #[derive(Debug, Clone)]
 pub(crate) enum NetDeviceError {
     ProtocolError { err: NetProtocolError },
+    EtherTapOpenFailed,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum NetDeviceType {
+pub(crate) enum NetDeviceType {
     Dummy,
     Loopback,
     Ethernet,
@@ -50,13 +62,14 @@ impl<'a> HardwareAddr<'a> {
 }
 
 // const NET_DEVICE_FLAG_UP: u16 = 0b0000_0000_0000_0001;
-const NET_DEVICE_FLAG_LOOPBACK: u16 = 0b0000_0000_0000_0010;
-const NET_DEVICE_FLAG_BROADCAST: u16 = 0b0000_0000_0000_0100;
-const NET_DEVICE_FLAG_P2P: u16 = 0b0000_0000_0000_1000;
-const NET_DEVICE_FLAG_NEED_ARP: u16 = 0b0000_0000_0001_0000;
+pub(crate) const NET_DEVICE_FLAG_LOOPBACK: u16 = 0b0000_0000_0000_0010;
+pub(crate) const NET_DEVICE_FLAG_BROADCAST: u16 = 0b0000_0000_0000_0100;
+pub(crate) const NET_DEVICE_FLAG_P2P: u16 = 0b0000_0000_0000_1000;
+pub(crate) const NET_DEVICE_FLAG_NEED_ARP: u16 = 0b0000_0000_0001_0000;
 
 #[derive(Debug, Clone)]
 pub(crate) struct NetDeviceInner {
+    dev_id: DeviceId,
     typ: NetDeviceType,
     mtu: u16,
     flags: u16,
@@ -66,24 +79,56 @@ pub(crate) struct NetDeviceInner {
 }
 
 impl NetDeviceInner {
+    #[inline(always)]
+    pub(crate) fn new(
+        dev_id: DeviceId,
+        typ: NetDeviceType,
+        mtu: u16,
+        flags: u16,
+        hlen: u16,
+        addr: Vec<u8>,
+        bloadcast: Vec<u8>,
+    ) -> Self {
+        Self {
+            dev_id,
+            typ,
+            mtu,
+            flags,
+            hlen,
+            addr,
+            bloadcast,
+        }
+    }
+
+    #[inline(always)]
+    pub(crate) fn dev_id(&self) -> DeviceId {
+        self.dev_id
+    }
+    #[inline(always)]
     pub(crate) fn typ(&self) -> NetDeviceType {
         self.typ
     }
+    #[inline(always)]
     pub(crate) fn mtu(&self) -> u16 {
         self.mtu
     }
+    #[inline(always)]
     pub(crate) fn flags(&self) -> u16 {
         self.flags
     }
+    #[inline(always)]
     pub(crate) fn flags_mut(&mut self) -> &mut u16 {
         &mut self.flags
     }
+    #[inline(always)]
     pub(crate) fn hlen(&self) -> u16 {
         self.hlen
     }
+    #[inline(always)]
     pub(crate) fn addr(&self) -> &[u8] {
         &self.addr
     }
+    #[inline(always)]
     pub(crate) fn bloadcast(&self) -> &[u8] {
         &self.bloadcast
     }

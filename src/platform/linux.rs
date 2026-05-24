@@ -1,3 +1,5 @@
+pub(crate) mod driver;
+
 use std::sync::Arc;
 
 use crate::devices::NetDevice;

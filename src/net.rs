@@ -8,7 +8,7 @@ use std::{
 
 use crate::{
     dbg,
-    devices::{NetDevice, NetDeviceError},
+    devices::{DeviceId, NetDevice, NetDeviceError},
     info,
     interfaces::{IfaceFamilyKind, IpIface, NetIface},
     print::debugdump,
@@ -29,8 +29,8 @@ static TCP_IP_APP: OnceLock<Arc<TcpIpApp>> = OnceLock::new();
 pub fn tcp_ip_run() -> Result<(), TcpIpError> {
     let mut tcp_ip_app = TcpIpApp::new()?;
 
-    let loopback_dev = crate::devices::LoopbackDevice::new();
-    tcp_ip_app.register_net_device(Box::new(loopback_dev));
+    tcp_ip_app.register_net_device(crate::devices::loopback::LoopbackDevice::new);
+    tcp_ip_app.register_net_device(crate::platform::linux::driver::ether_tap::EtherTapDevice::new);
 
     let mut ip_proto = IpProtocol::new();
     ip_proto
@@ -112,28 +112,28 @@ impl TcpIpApp {
         let id = crate::platform::random16();
         let mut seq = 0u16;
         while !self.terminated.load(Ordering::Relaxed) {
-            // crate::protocols::ip::output(
-            //     crate::protocols::ip::IpUpperProtocolType::Icmp,
-            //     &TEST_DATA[20..],
+            // // crate::protocols::ip::output(
+            // //     crate::protocols::ip::IpUpperProtocolType::Icmp,
+            // //     &TEST_DATA[20..],
+            // //     src,
+            // //     dst,
+            // // )
+            // // .unwrap();
+            //
+            // seq += 1;
+            // let seq_bytes = seq.to_be_bytes();
+            // let id_bytes = id.to_be_bytes();
+            // let val = [id_bytes[0], id_bytes[1], seq_bytes[0], seq_bytes[1]];
+            //
+            // crate::protocols::ip::icmp::output(
+            //     crate::protocols::ip::icmp::IcmpType::Echo,
+            //     crate::protocols::ip::icmp::IcmpCode::NetUnreach,
+            //     val,
+            //     &[0x54, 0x45, 0x53, 0x54], // 'T', 'E', 'S', 'T'
             //     src,
             //     dst,
             // )
             // .unwrap();
-
-            seq += 1;
-            let seq_bytes = seq.to_be_bytes();
-            let id_bytes = id.to_be_bytes();
-            let val = [id_bytes[0], id_bytes[1], seq_bytes[0], seq_bytes[1]];
-
-            crate::protocols::ip::icmp::output(
-                crate::protocols::ip::icmp::IcmpType::Echo,
-                crate::protocols::ip::icmp::IcmpCode::NetUnreach,
-                val,
-                &[0x54, 0x45, 0x53, 0x54], // 'T', 'E', 'S', 'T'
-                src,
-                dst,
-            )
-            .unwrap();
         }
 
         // cleanup
@@ -148,9 +148,12 @@ impl TcpIpApp {
         Ok(())
     }
 
-    fn register_net_device(&mut self, dev: Box<dyn NetDevice>) {
+    fn register_net_device<D: NetDevice, F: Fn(DeviceId) -> D>(&mut self, dev_init: F) {
+        let dev_id = DeviceId::new(self.devices.len());
+        let dev = dev_init(dev_id);
+
         let dev = NetDeviceContainer {
-            dev,
+            dev: Box::new(dev),
             state: Arc::new(RwLock::new(NetDeviceState {
                 name: format!("net{}", self.devices.len()),
                 is_open: false,
@@ -217,8 +220,8 @@ impl NetDeviceContainer {
     }
 
     #[inline]
-    pub(crate) fn dev(&self) -> &Box<dyn NetDevice> {
-        &self.dev
+    pub(crate) fn dev(&self) -> &dyn NetDevice {
+        &*self.dev
     }
 
     #[inline]
@@ -270,7 +273,7 @@ impl NetDeviceContainer {
                     len: data.len(),
                 })
             } else {
-                self.dev.output(typ, data, dst, self)?;
+                self.dev.output(typ, data, dst)?;
 
                 Ok(())
             }
@@ -296,15 +299,18 @@ impl NetDeviceState {
 }
 
 pub(crate) fn input_to_app(
+    dev_id: DeviceId,
     typ: NetProtocolType,
     data: &[u8],
-    dev: &NetDeviceContainer,
 ) -> Result<(), NetDeviceError> {
     dbg!("net_input: type={typ:?}, len={}", data.len());
 
     debugdump(data);
 
-    for proto in &TCP_IP_APP.get().unwrap().protocols {
+    let app = TCP_IP_APP.get().unwrap();
+    let dev = app.devices.get(dev_id.value()).unwrap();
+
+    for proto in &app.protocols {
         if proto.typ() == typ {
             proto.handle(data, dev)?;
 

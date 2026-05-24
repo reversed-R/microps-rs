@@ -1,6 +1,6 @@
 use crate::{
     dbg,
-    devices::{NET_DEVICE_FLAG_LOOPBACK, NetDevice, NetDeviceInner, NetDeviceType},
+    devices::{DeviceId, NET_DEVICE_FLAG_LOOPBACK, NetDevice, NetDeviceInner, NetDeviceType},
     info,
     net::input_to_app,
     print::debugdump,
@@ -15,9 +15,10 @@ pub struct LoopbackDevice {
 }
 
 impl LoopbackDevice {
-    pub fn new() -> Self {
+    pub fn new(dev_id: DeviceId) -> Self {
         Self {
             inner: NetDeviceInner {
+                dev_id,
                 typ: NetDeviceType::Loopback,
                 mtu: LOOPBACK_MTU,
                 flags: NET_DEVICE_FLAG_LOOPBACK,
@@ -44,13 +45,12 @@ impl NetDevice for LoopbackDevice {
         typ: crate::protocols::NetProtocolType,
         data: &[u8],
         dst: &super::HardwareAddr<'_>,
-        dev: &crate::net::NetDeviceContainer,
     ) -> Result<(), super::NetDeviceError> {
         info!("loopback device: type={typ:?}, len={}", data.len());
 
         debugdump(data);
 
-        input_to_app(typ, data, dev)
+        input_to_app(self.inner.dev_id(), typ, data)
     }
 
     fn close(&self) -> Result<(), super::NetDeviceError> {
