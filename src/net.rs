@@ -266,7 +266,7 @@ impl NetDeviceContainer {
         &self,
         typ: NetProtocolType,
         data: &[u8],
-        dst: &crate::devices::HardwareAddr,
+        dst: crate::devices::EthernetAddr,
     ) -> Result<(), TcpIpError> {
         dbg!("outputing dev={}", self.name());
         if !self.is_open() {

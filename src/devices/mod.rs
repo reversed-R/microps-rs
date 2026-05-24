@@ -8,6 +8,8 @@ use crate::{
 pub(crate) mod ethernet;
 pub(crate) mod loopback;
 
+pub(crate) use ethernet::EthernetAddr;
+
 #[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct DeviceId(usize);
@@ -29,7 +31,7 @@ pub(crate) trait NetDevice: Debug + Send + Sync + 'static {
         &self,
         typ: NetProtocolType,
         data: &[u8],
-        dst: &HardwareAddr,
+        dst: EthernetAddr,
     ) -> Result<(), NetDeviceError>;
     fn close(&mut self) -> Result<(), NetDeviceError>;
 }
@@ -38,6 +40,7 @@ pub(crate) trait NetDevice: Debug + Send + Sync + 'static {
 pub(crate) enum NetDeviceError {
     ProtocolError { err: NetProtocolError },
     EtherTapOpenFailed,
+    OutOfPayloadSize { size: usize },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -52,22 +55,6 @@ impl From<NetDeviceError> for TcpIpError {
         Self::DeviceError { error: value }
     }
 }
-
-pub(crate) struct HardwareAddr(Vec<u8>);
-
-impl HardwareAddr {
-    pub(crate) fn new(addr: Vec<u8>) -> Self {
-        Self(addr)
-    }
-}
-
-// pub(crate) struct HardwareAddr<'a>(&'a [u8]);
-//
-// impl<'a> HardwareAddr<'a> {
-//     pub(crate) fn new(addr: &'a [u8]) -> Self {
-//         Self(addr)
-//     }
-// }
 
 // const NET_DEVICE_FLAG_UP: u16 = 0b0000_0000_0000_0001;
 pub(crate) const NET_DEVICE_FLAG_LOOPBACK: u16 = 0b0000_0000_0000_0010;

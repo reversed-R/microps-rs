@@ -4,7 +4,7 @@ use std::fmt::Debug;
 
 use crate::{
     dbg,
-    devices::HardwareAddr,
+    devices::ethernet,
     interfaces::NetIface,
     net::select_ip_device,
     print::debugdump,
@@ -469,7 +469,7 @@ fn output_from_device(
     packet: IpPacket,
     dev: &crate::net::NetDeviceContainer,
 ) -> Result<(), NetProtocolOutputError> {
-    let dummy_dst_hwaddr = HardwareAddr::new(Vec::new());
+    let dummy_dst_hwaddr = ethernet::ETHER_ADDR_ANY;
 
     // FIXME: buffer size now hard coded as MTU 1500
     let mut data = [0u8; 1500];
@@ -482,7 +482,7 @@ fn output_from_device(
     dev.output(
         NetProtocolType::Ip,
         &data[..SIZE_OF_IP_HEADER + packet.payload.len()],
-        &dummy_dst_hwaddr,
+        dummy_dst_hwaddr,
     )
     .map_err(|e| NetProtocolOutputError::TcpIpError { error: Box::new(e) })
 }

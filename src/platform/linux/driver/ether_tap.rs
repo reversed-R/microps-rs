@@ -5,7 +5,8 @@ use crate::{
     devices::{
         self, DeviceId, NetDevice, NetDeviceInner, NetDeviceType,
         ethernet::{
-            ETHER_ADDR_ANY, ETHER_ADDR_BROADCAST, ETHER_ADDR_SIZE, ETHER_HEADER_SIZE, EthernetAddr,
+            ETHER_ADDR_ANY, ETHER_ADDR_BROADCAST, ETHER_ADDR_SIZE, ETHER_FRAME_SIZE_MAX,
+            ETHER_HEADER_SIZE, ETHER_PAYLOAD_SIZE_MAX, ETHER_PAYLOAD_SIZE_MIN, EthernetAddr,
             EthernetHeader,
         },
     },
@@ -13,18 +14,10 @@ use crate::{
     print::debugdump,
 };
 
-#[repr(C)]
-struct IfReq {
-    name: [libc::c_char; libc::IFNAMSIZ],
-    flags: libc::c_short,
-
-    __pading: [u8; 24],
-}
-
 #[derive(Debug)]
 pub struct EtherTapDevice {
     inner: NetDeviceInner,
-    tap_file: Option<std::fs::File>,
+    tap_file: libc::c_int,
     hw_addr: EthernetAddr,
 }
 
@@ -40,7 +33,7 @@ impl EtherTapDevice {
                 Vec::new(),
                 Vec::new(),
             ),
-            tap_file: None,
+            tap_file: -1,
             hw_addr: ETHER_ADDR_ANY,
         }
     }
@@ -91,7 +84,7 @@ impl NetDevice for EtherTapDevice {
             return Err(crate::devices::NetDeviceError::EtherTapOpenFailed);
         }
 
-        self.tap_file = Some(file.try_clone().unwrap());
+        self.tap_file = file.as_raw_fd();
 
         // get hardware address
         if self.hw_addr == ETHER_ADDR_ANY {
@@ -102,7 +95,7 @@ impl NetDevice for EtherTapDevice {
             }
             self.hw_addr = EthernetAddr::new(addr);
         }
-        let addr = self.hw_addr.clone();
+        let addr = self.hw_addr;
 
         let dev_id = self.inner.dev_id();
         std::thread::spawn(move || {
@@ -152,9 +145,36 @@ impl NetDevice for EtherTapDevice {
         &self,
         typ: crate::protocols::NetProtocolType,
         data: &[u8],
-        dst: &crate::devices::HardwareAddr,
+        dst: crate::devices::EthernetAddr,
     ) -> Result<(), crate::devices::NetDeviceError> {
-        todo!()
+        let hdr = EthernetHeader::new(dst, self.hw_addr, typ.into());
+        let hdr_bytes: [u8; ETHER_HEADER_SIZE] = unsafe { core::mem::transmute(hdr) };
+
+        let mut buf = [0u8; ETHER_FRAME_SIZE_MAX];
+        buf[..ETHER_HEADER_SIZE].copy_from_slice(&hdr_bytes);
+
+        let data_len = data.len();
+        if data_len > ETHER_PAYLOAD_SIZE_MAX {
+            return Err(crate::devices::NetDeviceError::OutOfPayloadSize { size: data_len });
+        }
+        let payload_len = if data_len < ETHER_PAYLOAD_SIZE_MIN {
+            ETHER_PAYLOAD_SIZE_MIN
+        } else {
+            data_len
+        };
+
+        if unsafe {
+            libc::write(
+                self.tap_file,
+                buf.as_mut_ptr() as *mut libc::c_void,
+                ETHER_HEADER_SIZE + payload_len,
+            )
+        } == -1
+        {
+            error!("failed to write to tap device");
+        }
+
+        Ok(())
     }
 
     fn close(&mut self) -> Result<(), crate::devices::NetDeviceError> {

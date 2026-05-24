@@ -1,9 +1,6 @@
 use std::fmt::Debug;
 
-use crate::{
-    devices::HardwareAddr,
-    protocols::{AsHost, NetProtocolType},
-};
+use crate::protocols::{AsHost, NetProtocolType};
 
 pub(crate) const ETHER_HEADER_SIZE: usize = 14;
 pub(crate) const ETHER_FRAME_SIZE_MIN: usize = 60;
@@ -39,10 +36,18 @@ pub(crate) enum EthernetType {
     IpV6 = ETHER_TYPE_IPV6,
 }
 
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) struct EthernetAddr([u8; ETHER_ADDR_SIZE]);
 
 impl EthernetHeader {
+    pub(crate) fn new(dst: EthernetAddr, src: EthernetAddr, typ: EthernetType) -> Self {
+        Self {
+            dst: dst.0,
+            src: src.0,
+            typ: (typ as u16).to_be(),
+        }
+    }
+
     #[inline(always)]
     pub(crate) fn dst(&self) -> EthernetAddr {
         EthernetAddr(self.dst)
@@ -79,6 +84,16 @@ impl From<EthernetType> for NetProtocolType {
             EthernetType::Ip => NetProtocolType::Ip,
             EthernetType::Arp => NetProtocolType::Arp,
             EthernetType::IpV6 => NetProtocolType::IpV6,
+        }
+    }
+}
+
+impl From<NetProtocolType> for EthernetType {
+    fn from(value: NetProtocolType) -> Self {
+        match value {
+            NetProtocolType::Ip => EthernetType::Ip,
+            NetProtocolType::Arp => EthernetType::Arp,
+            NetProtocolType::IpV6 => EthernetType::IpV6,
         }
     }
 }
