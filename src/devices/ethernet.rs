@@ -24,9 +24,9 @@ pub(crate) enum EthernetError {
     UnsurpportedType { typ: u16 },
 }
 
-const ETHER_TYPE_IP: u16 = 0x0800;
-const ETHER_TYPE_ARP: u16 = 0x0806;
-const ETHER_TYPE_IPV6: u16 = 0x86dd;
+pub(crate) const ETHER_TYPE_IP: u16 = 0x0800;
+pub(crate) const ETHER_TYPE_ARP: u16 = 0x0806;
+pub(crate) const ETHER_TYPE_IPV6: u16 = 0x86dd;
 
 #[repr(u16)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

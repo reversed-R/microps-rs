@@ -192,10 +192,13 @@ const _: () = assert!(SIZE_OF_IP_HEADER == core::mem::size_of::<IpHeader>());
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) struct IpAddr(u32);
 
+const _: () = assert!(IP_ADDR_SIZE == core::mem::size_of::<IpAddr>());
+
 pub(crate) const IP_ADDR_BROADCAST: IpAddr = IpAddr(0xffffffff);
 pub(crate) const IP_ADDR_LOOPBACK: IpAddr = IpAddr(0x7f000001);
 pub(crate) const IP_ADDR_LOOPBACK_NETMASK: IpAddr = IpAddr(0xff000000);
 pub(crate) const IP_ADDR_ANY: IpAddr = IpAddr(0x00000000);
+pub(crate) const IP_ADDR_SIZE: usize = 4;
 
 impl Debug for IpAddr {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

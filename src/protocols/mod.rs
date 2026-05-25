@@ -1,3 +1,4 @@
+pub(crate) mod arp;
 pub(crate) mod ip;
 
 use std::fmt::Debug;
@@ -36,6 +37,7 @@ pub(crate) enum NetProtocolError {
     IfaceError { error: NetIfaceError },
     DuplicatedUpperProtocol { proto: ip::IpUpperProtocolType },
     IpProtocolError { error: ip::IpProtocolError },
+    ArpProtocolError { error: arp::ArpProtocolError },
 }
 
 #[derive(Debug, Clone)]
