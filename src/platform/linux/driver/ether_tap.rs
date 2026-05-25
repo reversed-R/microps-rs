@@ -3,7 +3,7 @@ use std::{fs::OpenOptions, io::Read, os::fd::AsRawFd};
 use crate::{
     dbg,
     devices::{
-        self, DeviceId, NetDevice, NetDeviceInner, NetDeviceType,
+        self, DeviceId, NetDevice, NetDeviceAddr, NetDeviceInner, NetDeviceType,
         ethernet::{
             ETHER_ADDR_ANY, ETHER_ADDR_BROADCAST, ETHER_ADDR_SIZE, ETHER_FRAME_SIZE_MAX,
             ETHER_HEADER_SIZE, ETHER_PAYLOAD_SIZE_MAX, ETHER_PAYLOAD_SIZE_MIN, EthernetAddr,
@@ -30,8 +30,8 @@ impl EtherTapDevice {
                 devices::ethernet::ETHER_PAYLOAD_SIZE_MAX as u16,
                 devices::NET_DEVICE_FLAG_BROADCAST | devices::NET_DEVICE_FLAG_NEED_ARP,
                 devices::ethernet::ETHER_HEADER_SIZE as u16,
-                Vec::new(),
-                Vec::new(),
+                NetDeviceAddr::Ethernet(ETHER_ADDR_ANY),
+                NetDeviceAddr::Ethernet(ETHER_ADDR_BROADCAST),
             ),
             tap_file: -1,
             hw_addr: ETHER_ADDR_ANY,
@@ -147,6 +147,8 @@ impl NetDevice for EtherTapDevice {
         data: &[u8],
         dst: crate::devices::EthernetAddr,
     ) -> Result<(), crate::devices::NetDeviceError> {
+        dbg!("outputing from ether tap");
+
         let hdr = EthernetHeader::new(dst, self.hw_addr, typ.into());
         let hdr_bytes: [u8; ETHER_HEADER_SIZE] = unsafe { core::mem::transmute(hdr) };
 

@@ -2,7 +2,7 @@ use std::fmt::Debug;
 
 use crate::{
     TcpIpError,
-    protocols::{NetProtocolError, NetProtocolType},
+    protocols::{IpAddr, NetProtocolError, NetProtocolType},
 };
 
 pub(crate) mod ethernet;
@@ -69,8 +69,14 @@ pub(crate) struct NetDeviceInner {
     mtu: u16,
     flags: u16,
     hlen: u16,
-    addr: Vec<u8>,
-    bloadcast: Vec<u8>,
+    addr: NetDeviceAddr,
+    bloadcast: NetDeviceAddr,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) enum NetDeviceAddr {
+    Ethernet(EthernetAddr),
+    Ip(IpAddr),
 }
 
 impl NetDeviceInner {
@@ -81,8 +87,8 @@ impl NetDeviceInner {
         mtu: u16,
         flags: u16,
         hlen: u16,
-        addr: Vec<u8>,
-        bloadcast: Vec<u8>,
+        addr: NetDeviceAddr,
+        bloadcast: NetDeviceAddr,
     ) -> Self {
         Self {
             dev_id,
@@ -120,11 +126,11 @@ impl NetDeviceInner {
         self.hlen
     }
     #[inline(always)]
-    pub(crate) fn addr(&self) -> &[u8] {
+    pub(crate) fn addr(&self) -> &NetDeviceAddr {
         &self.addr
     }
     #[inline(always)]
-    pub(crate) fn bloadcast(&self) -> &[u8] {
+    pub(crate) fn bloadcast(&self) -> &NetDeviceAddr {
         &self.bloadcast
     }
 }

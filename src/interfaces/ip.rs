@@ -1,7 +1,10 @@
+use std::sync::{Arc, Weak};
+
 use crate::protocols::{IP_ADDR_BROADCAST, IpAddr, IpHeader};
 
 #[derive(Debug)]
 pub(crate) struct IpIface {
+    pub(crate) dev: Weak<crate::net::NetDeviceContainer>,
     unicast: IpAddr,
     netmask: IpAddr,
     broadcast: IpAddr,
@@ -10,10 +13,15 @@ pub(crate) struct IpIface {
 impl IpIface {
     pub(crate) fn new(unicast: IpAddr, netmask: IpAddr) -> Self {
         Self {
+            dev: Weak::new(),
             unicast,
             netmask,
             broadcast: IpAddr::broadcast(unicast, netmask),
         }
+    }
+
+    pub(crate) fn dev(&self) -> Option<Arc<crate::net::NetDeviceContainer>> {
+        self.dev.upgrade()
     }
 
     #[inline]

@@ -83,7 +83,7 @@ impl NetProtocol for IpProtocol {
             }
 
             for i in dev.state().ifaces() {
-                match i {
+                match &i {
                     NetIface::Ip(ip_iface) => {
                         let payload = &data[hdr.hlen()..hdr.total()];
 
@@ -128,15 +128,14 @@ impl NetProtocol for IpProtocol {
                         } else {
                             dbg!("ip packet for other hosts ignored.");
                         }
-                    }
-                    _ => {
-                        continue;
-                    }
+                    } // _ => {
+                      //     continue;
+                      // }
                 }
             }
 
             dbg!("ip iface not found and packet ignored.");
-            println!("dev={dev:?}");
+            dbg!("dev={:#?}", dev);
 
             Ok(())
         } else {
@@ -210,6 +209,10 @@ impl Debug for IpAddr {
 impl IpAddr {
     pub(crate) fn new(addr: u32) -> Self {
         Self(addr)
+    }
+
+    pub(crate) fn value(&self) -> u32 {
+        self.0
     }
 }
 

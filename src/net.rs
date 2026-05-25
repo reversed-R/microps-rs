@@ -14,7 +14,7 @@ use crate::{
     print::debugdump,
     protocols::{
         IP_ADDR_LOOPBACK, IP_ADDR_LOOPBACK_NETMASK, IpAddr, IpProtocol, NetProtocol,
-        NetProtocolType,
+        NetProtocolType, arp::ArpProtocol,
     },
 };
 
@@ -39,6 +39,8 @@ pub fn tcp_ip_run() -> Result<(), TcpIpError> {
         ))
         .unwrap();
     tcp_ip_app.register_net_protocol(ip_proto);
+    let arp_proto = ArpProtocol::new();
+    tcp_ip_app.register_net_protocol(arp_proto);
 
     tcp_ip_app.register_net_iface_on_device(
         NetIface::Ip(IpIface::new(IP_ADDR_LOOPBACK, IP_ADDR_LOOPBACK_NETMASK)),
@@ -46,7 +48,7 @@ pub fn tcp_ip_run() -> Result<(), TcpIpError> {
     )?;
     tcp_ip_app.register_net_iface_on_device(
         NetIface::Ip(IpIface::new(
-            IpAddr::from([192, 0, 2, 1]),
+            IpAddr::from([192, 0, 2, 2]),
             IpAddr::from([255, 255, 255, 0]),
         )),
         "net1",
@@ -89,7 +91,7 @@ pub enum TcpIpError {
 #[derive(Debug)]
 pub(crate) struct TcpIpApp {
     terminated: Arc<AtomicBool>,
-    devices: Vec<NetDeviceContainer>,
+    devices: Vec<Arc<NetDeviceContainer>>,
     pub(crate) protocols: Vec<Box<dyn NetProtocol>>,
 }
 
@@ -168,14 +170,18 @@ impl TcpIpApp {
             })),
         };
 
-        self.devices.push(dev);
+        self.devices.push(Arc::new(dev));
     }
 
     fn register_net_protocol<P: NetProtocol>(&mut self, proto: P) {
         self.protocols.push(Box::new(proto));
     }
 
-    fn register_net_iface_on_device(&self, iface: NetIface, dev: &str) -> Result<(), TcpIpError> {
+    fn register_net_iface_on_device(
+        &self,
+        mut iface: NetIface,
+        dev: &str,
+    ) -> Result<(), TcpIpError> {
         dbg!("registering iface on dev={}", dev);
 
         for d in &self.devices {
@@ -190,6 +196,7 @@ impl TcpIpApp {
                         dev: dev.into(),
                     });
                 } else {
+                    iface.set_dev(d);
                     d.state.write().unwrap().ifaces.push(iface);
                     return Ok(());
                 }
@@ -268,7 +275,12 @@ impl NetDeviceContainer {
         data: &[u8],
         dst: crate::devices::EthernetAddr,
     ) -> Result<(), TcpIpError> {
-        dbg!("outputing dev={}", self.name());
+        dbg!(
+            "outputing dev={}, typ={:?}, dst={:?}",
+            self.name(),
+            typ,
+            dst
+        );
         if !self.is_open() {
             Err(TcpIpError::DeviceAlreadyClosed {
                 name: self.name().clone(),
@@ -332,14 +344,11 @@ pub(crate) fn input_to_app(
 pub(crate) fn select_ip_device(addr: &IpAddr) -> Option<(&NetDeviceContainer, IpAddr)> {
     for dev in &TCP_IP_APP.get().unwrap().devices {
         for iface in dev.state().ifaces() {
-            match iface {
+            match &iface {
                 NetIface::Ip(iface) => {
                     if iface.unicast() == addr {
                         return Some((dev, *iface.netmask()));
                     }
-                }
-                NetIface::IpV6 => {
-                    todo!();
                 }
             }
         }

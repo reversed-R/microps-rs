@@ -1,9 +1,12 @@
 use crate::{
     dbg,
-    devices::{DeviceId, NET_DEVICE_FLAG_LOOPBACK, NetDevice, NetDeviceInner, NetDeviceType},
+    devices::{
+        DeviceId, NET_DEVICE_FLAG_LOOPBACK, NetDevice, NetDeviceAddr, NetDeviceInner, NetDeviceType,
+    },
     info,
     net::input_to_app,
     print::debugdump,
+    protocols::{IP_ADDR_BROADCAST, IP_ADDR_LOOPBACK},
 };
 
 /// maximum size of IP datagram
@@ -22,9 +25,9 @@ impl LoopbackDevice {
                 typ: NetDeviceType::Loopback,
                 mtu: LOOPBACK_MTU,
                 flags: NET_DEVICE_FLAG_LOOPBACK,
-                hlen: 0,          // non header
-                addr: Vec::new(), // non address
-                bloadcast: Vec::new(),
+                hlen: 0,                                   // non header
+                addr: NetDeviceAddr::Ip(IP_ADDR_LOOPBACK), // non address
+                bloadcast: NetDeviceAddr::Ip(IP_ADDR_BROADCAST),
             },
         }
     }

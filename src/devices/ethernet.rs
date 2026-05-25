@@ -102,4 +102,8 @@ impl EthernetAddr {
     pub(crate) fn new(addr: [u8; ETHER_ADDR_SIZE]) -> Self {
         Self(addr)
     }
+
+    pub(crate) fn value(&self) -> [u8; ETHER_ADDR_SIZE] {
+        self.0
+    }
 }
