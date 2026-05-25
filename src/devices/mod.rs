@@ -130,6 +130,10 @@ impl NetDeviceInner {
         &self.addr
     }
     #[inline(always)]
+    pub(crate) fn set_addr(&mut self, addr: NetDeviceAddr) {
+        self.addr = addr;
+    }
+    #[inline(always)]
     pub(crate) fn bloadcast(&self) -> &NetDeviceAddr {
         &self.bloadcast
     }

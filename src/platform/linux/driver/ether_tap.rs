@@ -18,7 +18,6 @@ use crate::{
 pub struct EtherTapDevice {
     inner: NetDeviceInner,
     tap_file: libc::c_int,
-    hw_addr: EthernetAddr,
 }
 
 impl EtherTapDevice {
@@ -34,7 +33,6 @@ impl EtherTapDevice {
                 NetDeviceAddr::Ethernet(ETHER_ADDR_BROADCAST),
             ),
             tap_file: -1,
-            hw_addr: ETHER_ADDR_ANY,
         }
     }
 }
@@ -87,15 +85,20 @@ impl NetDevice for EtherTapDevice {
         self.tap_file = file.as_raw_fd();
 
         // get hardware address
-        if self.hw_addr == ETHER_ADDR_ANY {
+        if let NetDeviceAddr::Ethernet(ETHER_ADDR_ANY) = self.inner.addr() {
             let raw_addr = unsafe { ifreq.ifr_ifru.ifru_hwaddr.sa_data };
             let mut addr = [0u8; ETHER_ADDR_SIZE];
             for (i, b) in raw_addr[..ETHER_ADDR_SIZE].iter().enumerate() {
                 addr[i] = *b as u8;
             }
-            self.hw_addr = EthernetAddr::new(addr);
+            let addr = EthernetAddr::new(addr);
+            dbg!("ether tap addr={:?}", addr);
+            self.inner.set_addr(NetDeviceAddr::Ethernet(addr));
         }
-        let addr = self.hw_addr;
+        let addr = match self.inner.addr() {
+            NetDeviceAddr::Ethernet(addr) => *addr,
+            _ => panic!(),
+        };
 
         let dev_id = self.inner.dev_id();
         std::thread::spawn(move || {
@@ -148,8 +151,12 @@ impl NetDevice for EtherTapDevice {
         dst: crate::devices::EthernetAddr,
     ) -> Result<(), crate::devices::NetDeviceError> {
         dbg!("outputing from ether tap");
+        let addr = match self.inner.addr() {
+            NetDeviceAddr::Ethernet(addr) => *addr,
+            _ => panic!(),
+        };
 
-        let hdr = EthernetHeader::new(dst, self.hw_addr, typ.into());
+        let hdr = EthernetHeader::new(dst, addr, typ.into());
         let hdr_bytes: [u8; ETHER_HEADER_SIZE] = unsafe { core::mem::transmute(hdr) };
 
         let mut buf = [0u8; ETHER_FRAME_SIZE_MAX];

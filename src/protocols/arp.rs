@@ -297,6 +297,7 @@ fn output_ether_ip(ip_iface: &IpIface, tha: EthernetAddr, tpa: IpAddr) {
             tpa: tpa.value().to_be_bytes(),
         },
     };
+    dbg!("{:?}", msg);
 
     let msg_bytes: [u8; ARP_ETHER_IP_SIZE] = unsafe { core::mem::transmute(msg) };
 
