@@ -166,6 +166,7 @@ impl NetDevice for EtherTapDevice {
         if data_len > ETHER_PAYLOAD_SIZE_MAX {
             return Err(crate::devices::NetDeviceError::OutOfPayloadSize { size: data_len });
         }
+        buf[ETHER_HEADER_SIZE..ETHER_HEADER_SIZE + data_len].copy_from_slice(data);
         let payload_len = if data_len < ETHER_PAYLOAD_SIZE_MIN {
             ETHER_PAYLOAD_SIZE_MIN
         } else {
