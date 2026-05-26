@@ -475,6 +475,7 @@ fn output_from_device(
     packet: IpPacket,
     dev: &crate::net::NetDeviceContainer,
 ) -> Result<(), NetProtocolOutputError> {
+    // TODO: must resolve hardware address which has IP address by ARP.
     let dummy_dst_hwaddr = ethernet::ETHER_ADDR_ANY;
 
     // FIXME: buffer size now hard coded as MTU 1500
@@ -510,6 +511,7 @@ pub(crate) trait IpUpperProtocolHandler: Debug + Send + Sync + 'static {
 
 #[derive(Debug, Clone)]
 pub(crate) enum IpProtocolError {
+    UnsurpportedType { typ: u8 },
     UnsurpportedProtocol { proto: u8 },
     IcmpError { error: IcmpError },
     IcmpOutputError { error: IcmpOutputError },

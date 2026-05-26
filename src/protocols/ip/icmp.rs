@@ -2,7 +2,7 @@ use std::fmt::Debug;
 
 use crate::{
     dbg,
-    protocols::{AsHost, IpAddr, NetProtocolOutputError, ip::IpUpperProtocolHandler},
+    protocols::{IpAddr, NetProtocolOutputError, ip::IpUpperProtocolHandler},
 };
 
 #[derive(Debug, Clone)]
@@ -37,13 +37,16 @@ impl IpUpperProtocolHandler for IcmpProtocol {
             payload[..SIZE_OF_ICMP_HEADER].try_into().unwrap();
         let hdr: IcmpHeader = unsafe { core::mem::transmute(hdr_bytes) };
 
-        match hdr.common.typ {
-            ICMP_TYPE_ECHO => {
+        dbg!("{:?}", hdr);
+
+        match hdr.common.typ()? {
+            IcmpType::Echo => {
                 dbg!("ICMP ECHO handling...");
 
                 output(
                     IcmpType::EchoReply,
-                    IcmpCode::try_from(hdr.common.code)
+                    hdr.common
+                        .code()
                         .map_err(|error| super::IpProtocolError::IcmpError { error })?,
                     hdr.dep,
                     &payload[SIZE_OF_ICMP_HEADER..],
@@ -55,7 +58,7 @@ impl IpUpperProtocolHandler for IcmpProtocol {
 
             x => {
                 // TODO:
-                dbg!("ICMP type={}", x);
+                dbg!("ICMP type={:?}", x);
                 Ok(())
             }
         }
@@ -67,6 +70,13 @@ pub(crate) enum IcmpError {
     TooShortPacket { len: usize },
     BrokenCheckSum,
     UnsurpportedCode { code: u8 },
+    UnsurpportedType { typ: u8 },
+}
+
+impl From<IcmpError> for super::IpProtocolError {
+    fn from(value: IcmpError) -> Self {
+        Self::IcmpError { error: value }
+    }
 }
 
 #[repr(C)]
@@ -87,6 +97,15 @@ struct IcmpHeaderCommon {
     typ: u8,
     code: u8,
     sum: u16,
+}
+
+impl IcmpHeaderCommon {
+    fn typ(&self) -> Result<IcmpType, IcmpError> {
+        IcmpType::try_from(self.typ)
+    }
+    fn code(&self) -> Result<IcmpCode, IcmpError> {
+        IcmpCode::try_from(self.code)
+    }
 }
 
 const ICMP_TYPE_ECHO_REPLY: u8 = 0;
@@ -115,6 +134,26 @@ pub(crate) enum IcmpType {
     TimestampReply = ICMP_TYPE_TIMESTAMP_REPLY,
     InfoRequest = ICMP_TYPE_INFO_REQUEST,
     InfoReply = ICMP_TYPE_INFO_REPLY,
+}
+
+impl TryFrom<u8> for IcmpType {
+    type Error = IcmpError;
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        match value {
+            ICMP_TYPE_ECHO_REPLY => Ok(Self::EchoReply),
+            ICMP_TYPE_DEST_UNREACH => Ok(Self::DestUnreach),
+            ICMP_TYPE_SOURCE_QUENCH => Ok(Self::SourceQuench),
+            ICMP_TYPE_REDIRECT => Ok(Self::Redirect),
+            ICMP_TYPE_ECHO => Ok(Self::Echo),
+            ICMP_TYPE_TIME_EXCEEDED => Ok(Self::TimeExceeded),
+            ICMP_TYPE_PARAM_PROBLEM => Ok(Self::ParamProblem),
+            ICMP_TYPE_TIMESTAMP => Ok(Self::Timestamp),
+            ICMP_TYPE_TIMESTAMP_REPLY => Ok(Self::TimestampReply),
+            ICMP_TYPE_INFO_REQUEST => Ok(Self::InfoRequest),
+            ICMP_TYPE_INFO_REPLY => Ok(Self::InfoReply),
+            _ => Err(IcmpError::UnsurpportedType { typ: value }),
+        }
+    }
 }
 
 const ICMP_CODE_NET_UNREACH: u8 = 0;
@@ -181,8 +220,8 @@ impl Debug for IcmpHeader {
     sum: {},
     dep: [{}, {}, {}, {}]
 }}"#,
-            self.common.typ,
-            self.common.code,
+            self.common.typ(),
+            self.common.code(),
             self.common.sum,
             self.dep[0],
             self.dep[1],
