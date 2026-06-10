@@ -1,6 +1,9 @@
-use std::sync::{
-    Arc, Mutex,
-    atomic::{AtomicPtr, AtomicUsize, Ordering},
+use std::{
+    fmt::Debug,
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicPtr, AtomicUsize, Ordering},
+    },
 };
 
 #[cfg(test)]
@@ -158,5 +161,11 @@ impl<T> Drop for RcuCell<T> {
         //   もし reader が Arc を保持中であれば strong_count > 0 のまま残り、
         //   reader が drop するまでメモリは解放されない(Arc の通常の動作)
         let _ = unsafe { Arc::from_raw(ptr as *const T) };
+    }
+}
+
+impl<T: Debug> Debug for RcuCell<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "RcuCell {{ ptr: {:?} }}", self.load())
     }
 }

@@ -2,7 +2,7 @@ use std::sync::{Arc, Weak};
 
 use crate::protocols::{IP_ADDR_BROADCAST, IpAddr, IpHeader};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct IpIface {
     pub(crate) dev: Weak<crate::net::NetDeviceContainer>,
     unicast: IpAddr,

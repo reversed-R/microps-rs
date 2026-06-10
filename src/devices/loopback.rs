@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use crate::{
     dbg,
     devices::{
@@ -14,13 +16,13 @@ const LOOPBACK_MTU: u16 = u16::MAX;
 
 #[derive(Debug)]
 pub struct LoopbackDevice {
-    inner: NetDeviceInner,
+    inner: Arc<NetDeviceInner>,
 }
 
 impl LoopbackDevice {
     pub fn new(dev_id: DeviceId) -> Self {
         Self {
-            inner: NetDeviceInner {
+            inner: Arc::new(NetDeviceInner {
                 dev_id,
                 typ: NetDeviceType::Loopback,
                 mtu: LOOPBACK_MTU,
@@ -28,17 +30,17 @@ impl LoopbackDevice {
                 hlen: 0,                                   // non header
                 addr: NetDeviceAddr::Ip(IP_ADDR_LOOPBACK), // non address
                 bloadcast: NetDeviceAddr::Ip(IP_ADDR_BROADCAST),
-            },
+            }),
         }
     }
 }
 
 impl NetDevice for LoopbackDevice {
-    fn info(&self) -> &NetDeviceInner {
-        &self.inner
+    fn info(&self) -> Arc<NetDeviceInner> {
+        Arc::clone(&self.inner)
     }
 
-    fn open(&mut self) -> Result<(), super::NetDeviceError> {
+    fn open(&self) -> Result<(), super::NetDeviceError> {
         dbg!("opening loopback device...");
         Ok(()) // nothing to do
     }
@@ -56,7 +58,7 @@ impl NetDevice for LoopbackDevice {
         input_to_app(self.inner.dev_id(), typ, data)
     }
 
-    fn close(&mut self) -> Result<(), super::NetDeviceError> {
+    fn close(&self) -> Result<(), super::NetDeviceError> {
         dbg!("closing loopback device...");
         Ok(()) // nothing to do
     }

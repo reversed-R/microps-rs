@@ -6,7 +6,7 @@ use crate::{
     dbg,
     devices::ethernet,
     interfaces::NetIface,
-    net::select_ip_device,
+    net::select_ip_iface,
     print::debugdump,
     protocols::{
         AsHost, AsNet, NetProtocol, NetProtocolError, NetProtocolOutputError, NetProtocolType,
@@ -82,7 +82,7 @@ impl NetProtocol for IpProtocol {
                 return Err(NetProtocolError::FragmentUnsurpported);
             }
 
-            for i in dev.state().ifaces() {
+            for i in &*dev.state().ifaces() {
                 match &i {
                     NetIface::Ip(ip_iface) => {
                         let payload = &data[hdr.hlen()..hdr.total()];
@@ -445,10 +445,12 @@ pub(crate) fn output(
         todo!("ip routing not implemented")
     }
 
-    let (dev, netmask) = select_ip_device(&src).expect("device not found");
-    if !src.is_same_subnet(&dst, &netmask) && dst != IP_ADDR_BROADCAST {
+    let iface = select_ip_iface(&src).expect("device not found");
+    if !src.is_same_subnet(&dst, iface.netmask()) && dst != IP_ADDR_BROADCAST {
         todo!("unreachable. {dst:?}");
     }
+
+    let dev = iface.dev().expect("device for iface not found");
 
     let mtu = dev.dev().info().mtu();
     if (mtu as usize) < SIZE_OF_IP_HEADER + data.len() {
@@ -468,7 +470,7 @@ pub(crate) fn output(
         payload: data,
     };
 
-    output_from_device(packet, dev)
+    output_from_device(packet, &dev)
 }
 
 fn output_from_device(

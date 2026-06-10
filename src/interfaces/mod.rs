@@ -6,7 +6,7 @@ pub(crate) use ip::IpIface;
 
 use crate::protocols::NetProtocolError;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) enum NetIface {
     Ip(IpIface),
     // IpV6, // TODO

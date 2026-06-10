@@ -1,12 +1,13 @@
 use std::{
     fmt::Debug,
     sync::{
-        Arc, OnceLock, RwLock, RwLockReadGuard,
+        Arc, OnceLock,
         atomic::{AtomicBool, Ordering},
     },
 };
 
 use crate::{
+    data_structure::rcu::RcuCell,
     dbg,
     devices::{DeviceId, NetDevice, NetDeviceError},
     info,
@@ -115,35 +116,7 @@ impl TcpIpApp {
             dev.open()?;
         }
 
-        let src = IP_ADDR_LOOPBACK;
-        let dst = src;
-
-        let id = crate::platform::random16();
-        let mut seq = 0u16;
-        while !self.terminated.load(Ordering::Relaxed) {
-            // // crate::protocols::ip::output(
-            // //     crate::protocols::ip::IpUpperProtocolType::Icmp,
-            // //     &TEST_DATA[20..],
-            // //     src,
-            // //     dst,
-            // // )
-            // // .unwrap();
-            //
-            // seq += 1;
-            // let seq_bytes = seq.to_be_bytes();
-            // let id_bytes = id.to_be_bytes();
-            // let val = [id_bytes[0], id_bytes[1], seq_bytes[0], seq_bytes[1]];
-            //
-            // crate::protocols::ip::icmp::output(
-            //     crate::protocols::ip::icmp::IcmpType::Echo,
-            //     crate::protocols::ip::icmp::IcmpCode::NetUnreach,
-            //     val,
-            //     &[0x54, 0x45, 0x53, 0x54], // 'T', 'E', 'S', 'T'
-            //     src,
-            //     dst,
-            // )
-            // .unwrap();
-        }
+        while !self.terminated.load(Ordering::Relaxed) {}
 
         // cleanup
         info!("Escape from TCP/IP processing.");
@@ -162,12 +135,12 @@ impl TcpIpApp {
         let dev = dev_init(dev_id);
 
         let dev = NetDeviceContainer {
-            dev: Arc::new(RwLock::new(dev)),
-            state: Arc::new(RwLock::new(NetDeviceState {
-                name: format!("net{}", self.devices.len()),
-                is_open: false,
-                ifaces: Vec::new(),
-            })),
+            dev: Box::new(dev),
+            name: format!("net{}", self.devices.len()),
+            state: NetDeviceState {
+                is_open: RcuCell::new(false),
+                ifaces: RcuCell::new(Vec::new()),
+            },
         };
 
         self.devices.push(Arc::new(dev));
@@ -178,29 +151,37 @@ impl TcpIpApp {
     }
 
     fn register_net_iface_on_device(
-        &self,
+        &mut self,
         mut iface: NetIface,
         dev: &str,
     ) -> Result<(), TcpIpError> {
         dbg!("registering iface on dev={}", dev);
 
         for d in &self.devices {
-            if d.name() == dev {
-                if d.state()
-                    .ifaces
-                    .iter()
-                    .any(|i| i.family_kind() == iface.family_kind())
-                {
-                    return Err(TcpIpError::DuplicatedIfaceFamily {
-                        family: iface.family_kind(),
-                        dev: dev.into(),
-                    });
-                } else {
-                    iface.set_dev(d);
-                    d.state.write().unwrap().ifaces.push(iface);
-                    return Ok(());
-                }
+            if d.name() != dev {
+                continue;
             }
+
+            if d.state()
+                .ifaces
+                .load()
+                .iter()
+                .any(|i| i.family_kind() == iface.family_kind())
+            {
+                return Err(TcpIpError::DuplicatedIfaceFamily {
+                    family: iface.family_kind(),
+                    dev: dev.into(),
+                });
+            }
+
+            iface.set_dev(d);
+            d.state.ifaces.update(|ifaces| {
+                let mut ifaces = ifaces.clone();
+                ifaces.push(iface);
+
+                ifaces
+            });
+            return Ok(());
         }
 
         Err(TcpIpError::DeviceNotFound {
@@ -211,36 +192,36 @@ impl TcpIpApp {
 
 #[derive(Debug)]
 pub(crate) struct NetDeviceContainer {
-    dev: Arc<RwLock<dyn NetDevice>>,
-    state: Arc<RwLock<NetDeviceState>>,
+    dev: Box<dyn NetDevice>,
+    name: String,
+    state: NetDeviceState,
 }
 
 #[derive(Debug)]
 pub(crate) struct NetDeviceState {
-    name: String,
-    is_open: bool,
-    ifaces: Vec<NetIface>,
+    is_open: RcuCell<bool>,
+    ifaces: RcuCell<Vec<NetIface>>,
 }
 
 impl NetDeviceContainer {
     #[inline]
     fn name(&self) -> String {
-        self.state.read().unwrap().name.clone()
+        self.name.clone()
     }
 
     #[inline]
     fn is_open(&self) -> bool {
-        self.state.read().unwrap().is_open
+        self.state.is_open()
     }
 
     #[inline]
-    pub(crate) fn dev(&self) -> RwLockReadGuard<'_, dyn NetDevice> {
-        self.dev.read().unwrap()
+    pub(crate) fn dev(&self) -> &dyn NetDevice {
+        &*self.dev
     }
 
     #[inline]
-    pub(crate) fn state(&self) -> RwLockReadGuard<'_, NetDeviceState> {
-        self.state.read().unwrap()
+    pub(crate) fn state(&self) -> &NetDeviceState {
+        &self.state
     }
 
     fn open(&self) -> Result<(), TcpIpError> {
@@ -250,8 +231,8 @@ impl NetDeviceContainer {
                 name: self.name().clone(),
             })
         } else {
-            self.dev.write().unwrap().open()?;
-            self.state.write().unwrap().is_open = true;
+            self.dev.open()?;
+            self.state.is_open.store(true);
             Ok(())
         }
     }
@@ -263,8 +244,8 @@ impl NetDeviceContainer {
                 name: self.name().clone(),
             })
         } else {
-            self.dev.write().unwrap().close()?;
-            self.state.write().unwrap().is_open = false;
+            self.dev.close()?;
+            self.state.is_open.store(false);
             Ok(())
         }
     }
@@ -303,18 +284,13 @@ impl NetDeviceContainer {
 
 impl NetDeviceState {
     #[inline]
-    pub(crate) fn name(&self) -> &String {
-        &self.name
-    }
-
-    #[inline]
     pub(crate) fn is_open(&self) -> bool {
-        self.is_open
+        *self.is_open.load()
     }
 
     #[inline]
-    pub(crate) fn ifaces(&self) -> &[NetIface] {
-        &self.ifaces
+    pub(crate) fn ifaces(&self) -> Arc<Vec<NetIface>> {
+        self.ifaces.load()
     }
 }
 
@@ -332,7 +308,7 @@ pub(crate) fn input_to_app(
 
     for proto in &app.protocols {
         if proto.typ() == typ {
-            proto.handle(data, dev)?;
+            proto.handle(data, &dev)?;
 
             return Ok(());
         }
@@ -341,13 +317,13 @@ pub(crate) fn input_to_app(
     Ok(())
 }
 
-pub(crate) fn select_ip_device(addr: &IpAddr) -> Option<(&NetDeviceContainer, IpAddr)> {
+pub(crate) fn select_ip_iface(addr: &IpAddr) -> Option<IpIface> {
     for dev in &TCP_IP_APP.get().unwrap().devices {
-        for iface in dev.state().ifaces() {
-            match &iface {
-                NetIface::Ip(iface) => {
-                    if iface.unicast() == addr {
-                        return Some((dev, *iface.netmask()));
+        for iface in dev.state.ifaces.load().iter() {
+            match iface {
+                NetIface::Ip(ip_iface) => {
+                    if ip_iface.unicast() == addr {
+                        return Some(ip_iface.clone());
                     }
                 }
             }

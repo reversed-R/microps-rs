@@ -1,6 +1,7 @@
-use std::{fs::OpenOptions, io::Read, os::fd::AsRawFd};
+use std::{fs::OpenOptions, io::Read, os::fd::AsRawFd, sync::Arc};
 
 use crate::{
+    data_structure::rcu::RcuCell,
     dbg,
     devices::{
         self, DeviceId, NetDevice, NetDeviceAddr, NetDeviceInner, NetDeviceType,
@@ -16,14 +17,14 @@ use crate::{
 
 #[derive(Debug)]
 pub struct EtherTapDevice {
-    inner: NetDeviceInner,
-    tap_file: libc::c_int,
+    inner: RcuCell<NetDeviceInner>,
+    tap_file: RcuCell<libc::c_int>,
 }
 
 impl EtherTapDevice {
     pub(crate) fn new(dev_id: DeviceId) -> Self {
         Self {
-            inner: NetDeviceInner::new(
+            inner: RcuCell::new(NetDeviceInner::new(
                 dev_id,
                 NetDeviceType::Ethernet,
                 devices::ethernet::ETHER_PAYLOAD_SIZE_MAX as u16,
@@ -31,18 +32,18 @@ impl EtherTapDevice {
                 devices::ethernet::ETHER_HEADER_SIZE as u16,
                 NetDeviceAddr::Ethernet(ETHER_ADDR_ANY),
                 NetDeviceAddr::Ethernet(ETHER_ADDR_BROADCAST),
-            ),
-            tap_file: -1,
+            )),
+            tap_file: RcuCell::new(-1),
         }
     }
 }
 
 impl NetDevice for EtherTapDevice {
-    fn info(&self) -> &NetDeviceInner {
-        &self.inner
+    fn info(&self) -> Arc<NetDeviceInner> {
+        self.inner.load()
     }
 
-    fn open(&mut self) -> Result<(), crate::devices::NetDeviceError> {
+    fn open(&self) -> Result<(), crate::devices::NetDeviceError> {
         let mut file = OpenOptions::new()
             .read(true)
             .write(true)
@@ -82,10 +83,10 @@ impl NetDevice for EtherTapDevice {
             return Err(crate::devices::NetDeviceError::EtherTapOpenFailed);
         }
 
-        self.tap_file = file.as_raw_fd();
+        self.tap_file.store(file.as_raw_fd());
 
         // get hardware address
-        if let NetDeviceAddr::Ethernet(ETHER_ADDR_ANY) = self.inner.addr() {
+        if let NetDeviceAddr::Ethernet(ETHER_ADDR_ANY) = self.inner.load().addr() {
             let raw_addr = unsafe { ifreq.ifr_ifru.ifru_hwaddr.sa_data };
             let mut addr = [0u8; ETHER_ADDR_SIZE];
             for (i, b) in raw_addr[..ETHER_ADDR_SIZE].iter().enumerate() {
@@ -93,14 +94,19 @@ impl NetDevice for EtherTapDevice {
             }
             let addr = EthernetAddr::new(addr);
             dbg!("ether tap addr={:?}", addr);
-            self.inner.set_addr(NetDeviceAddr::Ethernet(addr));
+            // FIXME: cloning cost
+            self.inner.update(|i| {
+                let mut i = i.clone();
+                i.set_addr(NetDeviceAddr::Ethernet(addr));
+                i
+            });
         }
-        let addr = match self.inner.addr() {
+        let addr = match self.inner.load().addr() {
             NetDeviceAddr::Ethernet(addr) => *addr,
             _ => panic!(),
         };
 
-        let dev_id = self.inner.dev_id();
+        let dev_id = self.inner.load().dev_id();
         std::thread::spawn(move || {
             let mut buf = [0u8; devices::ethernet::ETHER_FRAME_SIZE_MAX];
             loop {
@@ -151,7 +157,7 @@ impl NetDevice for EtherTapDevice {
         dst: crate::devices::EthernetAddr,
     ) -> Result<(), crate::devices::NetDeviceError> {
         dbg!("outputing from ether tap");
-        let addr = match self.inner.addr() {
+        let addr = match self.inner.load().addr() {
             NetDeviceAddr::Ethernet(addr) => *addr,
             _ => panic!(),
         };
@@ -175,7 +181,7 @@ impl NetDevice for EtherTapDevice {
 
         if unsafe {
             libc::write(
-                self.tap_file,
+                *self.tap_file.load(),
                 buf.as_mut_ptr() as *mut libc::c_void,
                 ETHER_HEADER_SIZE + payload_len,
             )
@@ -187,7 +193,7 @@ impl NetDevice for EtherTapDevice {
         Ok(())
     }
 
-    fn close(&mut self) -> Result<(), crate::devices::NetDeviceError> {
+    fn close(&self) -> Result<(), crate::devices::NetDeviceError> {
         // nothing to do
         Ok(())
     }

@@ -1,4 +1,4 @@
-use std::fmt::Debug;
+use std::{fmt::Debug, sync::Arc};
 
 use crate::{
     TcpIpError,
@@ -25,15 +25,15 @@ impl DeviceId {
 }
 
 pub(crate) trait NetDevice: Debug + Send + Sync + 'static {
-    fn info(&self) -> &NetDeviceInner;
-    fn open(&mut self) -> Result<(), NetDeviceError>;
+    fn info(&self) -> Arc<NetDeviceInner>;
+    fn open(&self) -> Result<(), NetDeviceError>;
     fn output(
         &self,
         typ: NetProtocolType,
         data: &[u8],
         dst: EthernetAddr,
     ) -> Result<(), NetDeviceError>;
-    fn close(&mut self) -> Result<(), NetDeviceError>;
+    fn close(&self) -> Result<(), NetDeviceError>;
 }
 
 #[derive(Debug, Clone)]

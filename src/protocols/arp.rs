@@ -246,7 +246,7 @@ impl NetProtocol for ArpProtocol {
 
         dbg!("{:?}", msg);
 
-        for i in dev.state().ifaces() {
+        for i in &*dev.state().ifaces() {
             match i {
                 NetIface::Ip(ip_iface) => {
                     if ip_iface.unicast() == &msg.body.tpa() {
