@@ -1,7 +1,11 @@
+pub(crate) mod context;
+
+pub(crate) use context::ProtocolStackContext;
+
 use std::{
     fmt::Debug,
     sync::{
-        Arc, OnceLock,
+        Arc,
         atomic::{AtomicBool, Ordering},
     },
 };
@@ -12,57 +16,56 @@ use crate::{
     devices::{DeviceId, NetDevice, NetDeviceError},
     info,
     interfaces::{IfaceFamilyKind, IpIface, NetIface},
-    print::debugdump,
     protocols::{
         IP_ADDR_LOOPBACK, IP_ADDR_LOOPBACK_NETMASK, IpAddr, IpProtocol, NetProtocol,
         NetProtocolType, arp::ArpProtocol,
     },
 };
 
-const TEST_DATA: &[u8] = &[
-    0x45, 0x00, 0x00, 0x30, 0x00, 0x80, 0x00, 0x00, 0xff, 0x01, 0xbd, 0x4a, 0x7f, 0x00, 0x00, 0x01,
-    0x7f, 0x00, 0x00, 0x01, 0x08, 0x00, 0x35, 0x64, 0x00, 0x80, 0x00, 0x01, 0x31, 0x32, 0x33, 0x34,
-    0x35, 0x36, 0x37, 0x38, 0x39, 0x30, 0x21, 0x40, 0x23, 0x24, 0x25, 0x5e, 0x26, 0x2a, 0x28, 0x29,
-];
-
-static TCP_IP_APP: OnceLock<Arc<ProtocolStackApp>> = OnceLock::new();
-
-pub fn tcp_ip_run() -> Result<(), AppError> {
-    let mut tcp_ip_app = ProtocolStackApp::new()?;
-
-    tcp_ip_app.register_net_device(crate::devices::loopback::LoopbackDevice::new);
-    tcp_ip_app.register_net_device(crate::platform::linux::driver::ether_tap::EtherTapDevice::new);
-
-    let mut ip_proto = IpProtocol::new();
-    ip_proto
-        .register_protocol(crate::protocols::ip::IpUpperProtocol::Icmp(
-            crate::protocols::ip::icmp::IcmpProtocol,
-        ))
-        .unwrap();
-    tcp_ip_app.register_net_protocol(ip_proto);
-    let arp_proto = ArpProtocol::new();
-    tcp_ip_app.register_net_protocol(arp_proto);
-
-    tcp_ip_app.register_net_iface_on_device(
-        NetIface::Ip(IpIface::new(IP_ADDR_LOOPBACK, IP_ADDR_LOOPBACK_NETMASK)),
-        "net0",
-    )?;
-    tcp_ip_app.register_net_iface_on_device(
-        NetIface::Ip(IpIface::new(
-            IpAddr::from([192, 0, 2, 2]),
-            IpAddr::from([255, 255, 255, 0]),
-        )),
-        "net1",
-    )?;
-
-    TCP_IP_APP
-        .set(Arc::new(tcp_ip_app))
-        .map_err(|_| AppError::FaildToInit)?;
-
-    TCP_IP_APP.get().unwrap().run()?;
-
-    Ok(())
-}
+// const TEST_DATA: &[u8] = &[
+//     0x45, 0x00, 0x00, 0x30, 0x00, 0x80, 0x00, 0x00, 0xff, 0x01, 0xbd, 0x4a, 0x7f, 0x00, 0x00, 0x01,
+//     0x7f, 0x00, 0x00, 0x01, 0x08, 0x00, 0x35, 0x64, 0x00, 0x80, 0x00, 0x01, 0x31, 0x32, 0x33, 0x34,
+//     0x35, 0x36, 0x37, 0x38, 0x39, 0x30, 0x21, 0x40, 0x23, 0x24, 0x25, 0x5e, 0x26, 0x2a, 0x28, 0x29,
+// ];
+//
+// static TCP_IP_APP: OnceLock<Arc<ProtocolStackApp>> = OnceLock::new();
+//
+// pub fn tcp_ip_run() -> Result<(), AppError> {
+//     let mut tcp_ip_app = ProtocolStackApp::new()?;
+//
+//     tcp_ip_app.register_net_device(crate::devices::loopback::LoopbackDevice::new);
+//     tcp_ip_app.register_net_device(crate::platform::linux::driver::ether_tap::EtherTapDevice::new);
+//
+//     let mut ip_proto = IpProtocol::new();
+//     ip_proto
+//         .register_protocol(crate::protocols::ip::IpUpperProtocol::Icmp(
+//             crate::protocols::ip::icmp::IcmpProtocol,
+//         ))
+//         .unwrap();
+//     tcp_ip_app.register_net_protocol(ip_proto);
+//     let arp_proto = ArpProtocol::new();
+//     tcp_ip_app.register_net_protocol(arp_proto);
+//
+//     tcp_ip_app.register_net_iface_on_device(
+//         NetIface::Ip(IpIface::new(IP_ADDR_LOOPBACK, IP_ADDR_LOOPBACK_NETMASK)),
+//         "net0",
+//     )?;
+//     tcp_ip_app.register_net_iface_on_device(
+//         NetIface::Ip(IpIface::new(
+//             IpAddr::from([192, 0, 2, 2]),
+//             IpAddr::from([255, 255, 255, 0]),
+//         )),
+//         "net1",
+//     )?;
+//
+//     TCP_IP_APP
+//         .set(Arc::new(tcp_ip_app))
+//         .map_err(|_| AppError::FaildToInit)?;
+//
+//     TCP_IP_APP.get().unwrap().run()?;
+//
+//     Ok(())
+// }
 
 #[derive(Debug, Clone)]
 pub enum AppError {
@@ -90,14 +93,14 @@ pub enum AppError {
 }
 
 #[derive(Debug)]
-pub(crate) struct ProtocolStackApp {
+pub struct ProtocolStackApp {
     terminated: Arc<AtomicBool>,
     devices: Vec<Arc<NetDeviceContainer>>,
     pub(crate) protocols: Vec<Box<dyn NetProtocol>>,
 }
 
 impl ProtocolStackApp {
-    fn new() -> Result<Self, AppError> {
+    pub fn new() -> Result<Self, AppError> {
         Ok(Self {
             terminated: Arc::new(AtomicBool::new(false)),
             devices: Vec::new(),
@@ -105,23 +108,25 @@ impl ProtocolStackApp {
         })
     }
 
-    fn run(&self) -> Result<(), AppError> {
-        signal_hook::flag::register(signal_hook::consts::SIGINT, Arc::clone(&self.terminated))
+    pub fn run(self) -> Result<(), AppError> {
+        let ctx = ProtocolStackContext::new(self);
+
+        signal_hook::flag::register(signal_hook::consts::SIGINT, Arc::clone(&ctx.app.terminated))
             .unwrap();
 
         info!("Starting TCP/IP processing...");
         info!("Press <Ctrl> + C to terminate.");
 
-        for dev in &self.devices {
-            dev.open()?;
+        for dev in &ctx.app.devices {
+            dev.open(ctx.clone())?;
         }
 
-        while !self.terminated.load(Ordering::Relaxed) {}
+        while !ctx.app.terminated.load(Ordering::Relaxed) {}
 
         // cleanup
         info!("Escape from TCP/IP processing.");
 
-        for dev in &self.devices {
+        for dev in &ctx.app.devices {
             dev.close()?;
         }
 
@@ -188,6 +193,35 @@ impl ProtocolStackApp {
             dev: dev.to_string(),
         })
     }
+
+    pub fn setup_mock(mut self) -> Result<Self, AppError> {
+        self.register_net_device(crate::devices::loopback::LoopbackDevice::new);
+        self.register_net_device(crate::platform::linux::driver::ether_tap::EtherTapDevice::new);
+
+        let mut ip_proto = IpProtocol::new();
+        ip_proto
+            .register_protocol(crate::protocols::ip::IpUpperProtocol::Icmp(
+                crate::protocols::ip::icmp::IcmpProtocol,
+            ))
+            .unwrap();
+        self.register_net_protocol(ip_proto);
+        let arp_proto = ArpProtocol::new();
+        self.register_net_protocol(arp_proto);
+
+        self.register_net_iface_on_device(
+            NetIface::Ip(IpIface::new(IP_ADDR_LOOPBACK, IP_ADDR_LOOPBACK_NETMASK)),
+            "net0",
+        )?;
+        self.register_net_iface_on_device(
+            NetIface::Ip(IpIface::new(
+                IpAddr::from([192, 0, 2, 2]),
+                IpAddr::from([255, 255, 255, 0]),
+            )),
+            "net1",
+        )?;
+
+        Ok(self)
+    }
 }
 
 #[derive(Debug)]
@@ -224,14 +258,14 @@ impl NetDeviceContainer {
         &self.state
     }
 
-    fn open(&self) -> Result<(), AppError> {
+    fn open(&self, ctx: ProtocolStackContext) -> Result<(), AppError> {
         dbg!("opening dev={}", &self.name());
         if self.is_open() {
             Err(AppError::DeviceAlreadyOpened {
                 name: self.name().clone(),
             })
         } else {
-            self.dev.open()?;
+            self.dev.open(ctx)?;
             self.state.is_open.store(true);
             Ok(())
         }
@@ -252,6 +286,7 @@ impl NetDeviceContainer {
 
     pub(crate) fn output(
         &self,
+        ctx: ProtocolStackContext,
         typ: NetProtocolType,
         data: &[u8],
         dst: crate::devices::EthernetAddr,
@@ -274,7 +309,7 @@ impl NetDeviceContainer {
                     len: data.len(),
                 })
             } else {
-                self.dev().output(typ, data, dst)?;
+                self.dev().output(ctx, typ, data, dst)?;
 
                 Ok(())
             }
@@ -292,43 +327,4 @@ impl NetDeviceState {
     pub(crate) fn ifaces(&self) -> Arc<Vec<NetIface>> {
         self.ifaces.load()
     }
-}
-
-pub(crate) fn input_to_app(
-    dev_id: DeviceId,
-    typ: NetProtocolType,
-    data: &[u8],
-) -> Result<(), NetDeviceError> {
-    dbg!("net_input: type={typ:?}, len={}", data.len());
-
-    debugdump(data);
-
-    let app = TCP_IP_APP.get().unwrap();
-    let dev = app.devices.get(dev_id.value()).unwrap();
-
-    for proto in &app.protocols {
-        if proto.typ() == typ {
-            proto.handle(data, dev)?;
-
-            return Ok(());
-        }
-    }
-
-    Ok(())
-}
-
-pub(crate) fn select_ip_iface(addr: &IpAddr) -> Option<IpIface> {
-    for dev in &TCP_IP_APP.get().unwrap().devices {
-        for iface in dev.state.ifaces.load().iter() {
-            match iface {
-                NetIface::Ip(ip_iface) => {
-                    if ip_iface.unicast() == addr {
-                        return Some(ip_iface.clone());
-                    }
-                }
-            }
-        }
-    }
-
-    None
 }

@@ -2,6 +2,7 @@ use std::{fmt::Debug, sync::Arc};
 
 use crate::{
     AppError,
+    net::ProtocolStackContext,
     protocols::{IpAddr, NetProtocolError, NetProtocolType},
 };
 
@@ -26,9 +27,10 @@ impl DeviceId {
 
 pub(crate) trait NetDevice: Debug + Send + Sync + 'static {
     fn info(&self) -> Arc<NetDeviceInner>;
-    fn open(&self) -> Result<(), NetDeviceError>;
+    fn open(&self, ctx: ProtocolStackContext) -> Result<(), NetDeviceError>;
     fn output(
         &self,
+        ctx: ProtocolStackContext,
         typ: NetProtocolType,
         data: &[u8],
         dst: EthernetAddr,

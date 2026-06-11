@@ -1,4 +1,4 @@
-use std::fmt::Debug;
+use std::{collections::HashMap, fmt::Debug, sync::RwLock};
 
 use crate::{
     dbg,
@@ -7,6 +7,7 @@ use crate::{
         ethernet::{ETHER_ADDR_SIZE, ETHER_TYPE_IP},
     },
     interfaces::{IpIface, NetIface},
+    net::ProtocolStackContext,
     protocols::{AsNet, IpAddr, NetProtocol, ip::IP_ADDR_SIZE},
 };
 
@@ -198,11 +199,20 @@ impl From<ArpProtocolError> for super::NetProtocolError {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct ArpProtocol;
+pub(crate) struct ArpEntry {
+    phys_addr: EthernetAddr,
+}
+
+#[derive(Debug)]
+pub(crate) struct ArpProtocol {
+    cache: RwLock<HashMap<IpAddr, EthernetAddr>>,
+}
 
 impl ArpProtocol {
     pub(crate) fn new() -> Self {
-        Self
+        Self {
+            cache: RwLock::new(HashMap::new()),
+        }
     }
 }
 
@@ -214,6 +224,7 @@ impl NetProtocol for ArpProtocol {
     // NOTE: only surpports Ethernet Address (MAC Address) and IP Address (v4) resolution.
     fn handle(
         &self,
+        ctx: ProtocolStackContext,
         data: &[u8],
         dev: &crate::net::NetDeviceContainer,
     ) -> Result<(), super::NetProtocolError> {
@@ -253,7 +264,7 @@ impl NetProtocol for ArpProtocol {
                         dbg!("iface found: ip_iface={:?}", ip_iface);
                         match msg.header.op()? {
                             ArpOp::Request => {
-                                output_ether_ip(ip_iface, msg.body.sha(), msg.body.spa());
+                                output_ether_ip(ctx, ip_iface, msg.body.sha(), msg.body.spa());
                                 return Ok(());
                             }
                             ArpOp::Reply => {
@@ -272,7 +283,7 @@ impl NetProtocol for ArpProtocol {
     }
 }
 
-fn output_ether_ip(ip_iface: &IpIface, tha: EthernetAddr, tpa: IpAddr) {
+fn output_ether_ip(ctx: ProtocolStackContext, ip_iface: &IpIface, tha: EthernetAddr, tpa: IpAddr) {
     dbg!("arp output (ethernet and ip mode)");
 
     let sha = match ip_iface.dev().unwrap().dev().info().addr() {
@@ -304,6 +315,6 @@ fn output_ether_ip(ip_iface: &IpIface, tha: EthernetAddr, tpa: IpAddr) {
     ip_iface
         .dev()
         .unwrap()
-        .output(super::NetProtocolType::Arp, &msg_bytes, tha)
+        .output(ctx, super::NetProtocolType::Arp, &msg_bytes, tha)
         .unwrap();
 }

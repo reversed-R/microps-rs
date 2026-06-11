@@ -6,7 +6,7 @@ use crate::{
         DeviceId, NET_DEVICE_FLAG_LOOPBACK, NetDevice, NetDeviceAddr, NetDeviceInner, NetDeviceType,
     },
     info,
-    net::input_to_app,
+    net::ProtocolStackContext,
     print::debugdump,
     protocols::{IP_ADDR_BROADCAST, IP_ADDR_LOOPBACK},
 };
@@ -40,13 +40,14 @@ impl NetDevice for LoopbackDevice {
         Arc::clone(&self.inner)
     }
 
-    fn open(&self) -> Result<(), super::NetDeviceError> {
+    fn open(&self, _ctx: ProtocolStackContext) -> Result<(), super::NetDeviceError> {
         dbg!("opening loopback device...");
         Ok(()) // nothing to do
     }
 
     fn output(
         &self,
+        ctx: ProtocolStackContext,
         typ: crate::protocols::NetProtocolType,
         data: &[u8],
         _dst: super::EthernetAddr,
@@ -55,7 +56,7 @@ impl NetDevice for LoopbackDevice {
 
         debugdump(data);
 
-        input_to_app(self.inner.dev_id(), typ, data)
+        ctx.input(self.inner.dev_id(), typ, data)
     }
 
     fn close(&self) -> Result<(), super::NetDeviceError> {

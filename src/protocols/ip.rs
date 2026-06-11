@@ -6,7 +6,7 @@ use crate::{
     dbg,
     devices::ethernet,
     interfaces::NetIface,
-    net::select_ip_iface,
+    net::ProtocolStackContext,
     print::debugdump,
     protocols::{
         AsHost, AsNet, NetProtocol, NetProtocolError, NetProtocolOutputError, NetProtocolType,
@@ -51,6 +51,7 @@ impl NetProtocol for IpProtocol {
 
     fn handle(
         &self,
+        ctx: ProtocolStackContext,
         data: &[u8],
         dev: &crate::net::NetDeviceContainer,
     ) -> Result<(), NetProtocolError> {
@@ -97,7 +98,7 @@ impl NetProtocol for IpProtocol {
                                 if proto == p_handler.protocol_type() {
                                     match p_handler {
                                         IpUpperProtocol::Icmp(handler) => {
-                                            handler.handle(hdr, payload, ip_iface).map_err(
+                                            handler.handle(ctx, hdr, payload, ip_iface).map_err(
                                                 |error| NetProtocolError::IpProtocolError { error },
                                             )?;
                                         }
@@ -110,6 +111,7 @@ impl NetProtocol for IpProtocol {
                             if hdr.hlen() + 8 < hdr.total() {
                                 // desitination unreachable ICMP error message
                                 icmp::output(
+                                    ctx,
                                     icmp::IcmpType::DestUnreach,
                                     icmp::IcmpCode::ProtoUnreach,
                                     [0; _],
@@ -434,6 +436,7 @@ struct IpPacket<'p> {
 }
 
 pub(crate) fn output(
+    ctx: ProtocolStackContext,
     protocol: IpUpperProtocolType,
     data: &[u8],
     src: IpAddr,
@@ -445,7 +448,7 @@ pub(crate) fn output(
         todo!("ip routing not implemented")
     }
 
-    let iface = select_ip_iface(&src).expect("device not found");
+    let iface = ctx.select_ip_iface(&src).expect("device not found");
     if !src.is_same_subnet(&dst, iface.netmask()) && dst != IP_ADDR_BROADCAST {
         todo!("unreachable. {dst:?}");
     }
@@ -470,10 +473,11 @@ pub(crate) fn output(
         payload: data,
     };
 
-    output_from_device(packet, &dev)
+    output_from_device(ctx, packet, &dev)
 }
 
 fn output_from_device(
+    ctx: ProtocolStackContext,
     packet: IpPacket,
     dev: &crate::net::NetDeviceContainer,
 ) -> Result<(), NetProtocolOutputError> {
@@ -489,6 +493,7 @@ fn output_from_device(
         .copy_from_slice(packet.payload);
 
     dev.output(
+        ctx,
         NetProtocolType::Ip,
         &data[..SIZE_OF_IP_HEADER + packet.payload.len()],
         dummy_dst_hwaddr,
@@ -505,6 +510,7 @@ pub(crate) trait IpUpperProtocolHandler: Debug + Send + Sync + 'static {
     fn protocol(&self) -> &IpUpperProtocolType;
     fn handle(
         &self,
+        ctx: ProtocolStackContext,
         hdr: IpHeader,
         payload: &[u8],
         iface: &crate::interfaces::IpIface,

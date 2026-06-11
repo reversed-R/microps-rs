@@ -2,6 +2,7 @@ use std::fmt::Debug;
 
 use crate::{
     dbg,
+    net::ProtocolStackContext,
     protocols::{IpAddr, NetProtocolOutputError, ip::IpUpperProtocolHandler},
 };
 
@@ -15,6 +16,7 @@ impl IpUpperProtocolHandler for IcmpProtocol {
 
     fn handle(
         &self,
+        ctx: ProtocolStackContext,
         ip_hdr: super::IpHeader,
         payload: &[u8],
         iface: &crate::interfaces::IpIface,
@@ -44,6 +46,7 @@ impl IpUpperProtocolHandler for IcmpProtocol {
                 dbg!("ICMP ECHO handling...");
 
                 output(
+                    ctx,
                     IcmpType::EchoReply,
                     hdr.common
                         .code()
@@ -232,6 +235,7 @@ impl Debug for IcmpHeader {
 }
 
 pub(crate) fn output(
+    ctx: ProtocolStackContext,
     typ: IcmpType,
     code: IcmpCode,
     val: [u8; 4],
@@ -266,6 +270,6 @@ pub(crate) fn output(
     buf[2] = sum_bytes[0];
     buf[3] = sum_bytes[1];
 
-    super::output(super::IpUpperProtocolType::Icmp, &buf[..len], src, dst)
+    super::output(ctx, super::IpUpperProtocolType::Icmp, &buf[..len], src, dst)
         .map_err(|error| IcmpOutputError::NetProtocolOutputError { error })
 }

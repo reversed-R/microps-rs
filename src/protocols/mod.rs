@@ -4,7 +4,10 @@ pub(crate) mod ip;
 use std::fmt::Debug;
 
 use crate::{
-    AppError, devices::NetDeviceError, interfaces::NetIfaceError, net::NetDeviceContainer,
+    AppError,
+    devices::NetDeviceError,
+    interfaces::NetIfaceError,
+    net::{NetDeviceContainer, ProtocolStackContext},
 };
 
 pub(crate) use ip::{
@@ -24,7 +27,12 @@ pub(crate) enum NetProtocolType {
 
 pub(crate) trait NetProtocol: Debug + Send + Sync + 'static {
     fn typ(&self) -> NetProtocolType;
-    fn handle(&self, data: &[u8], dev: &NetDeviceContainer) -> Result<(), NetProtocolError>;
+    fn handle(
+        &self,
+        ctx: ProtocolStackContext,
+        data: &[u8],
+        dev: &NetDeviceContainer,
+    ) -> Result<(), NetProtocolError>;
 }
 
 #[derive(Debug, Clone)]

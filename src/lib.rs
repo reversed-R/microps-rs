@@ -9,4 +9,4 @@ mod protocols;
 #[cfg(test)]
 mod tests;
 
-pub use net::{AppError, tcp_ip_run};
+pub use net::{AppError, ProtocolStackApp};

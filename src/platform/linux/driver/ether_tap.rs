@@ -12,6 +12,7 @@ use crate::{
         },
     },
     error,
+    net::ProtocolStackContext,
     print::debugdump,
 };
 
@@ -43,7 +44,7 @@ impl NetDevice for EtherTapDevice {
         self.inner.load()
     }
 
-    fn open(&self) -> Result<(), crate::devices::NetDeviceError> {
+    fn open(&self, ctx: ProtocolStackContext) -> Result<(), crate::devices::NetDeviceError> {
         let mut file = OpenOptions::new()
             .read(true)
             .write(true)
@@ -136,7 +137,7 @@ impl NetDevice for EtherTapDevice {
                             continue;
                         }
 
-                        crate::net::input_to_app(dev_id, typ.into(), &buf[ETHER_HEADER_SIZE..n])
+                        ctx.input(dev_id, typ.into(), &buf[ETHER_HEADER_SIZE..n])
                             .unwrap();
                     }
                     Err(e) => {
@@ -152,6 +153,7 @@ impl NetDevice for EtherTapDevice {
 
     fn output(
         &self,
+        _ctx: ProtocolStackContext,
         typ: crate::protocols::NetProtocolType,
         data: &[u8],
         dst: crate::devices::EthernetAddr,
