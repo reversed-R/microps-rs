@@ -4,7 +4,7 @@ pub(crate) mod ip;
 use std::fmt::Debug;
 
 use crate::{
-    TcpIpError, devices::NetDeviceError, interfaces::NetIfaceError, net::NetDeviceContainer,
+    AppError, devices::NetDeviceError, interfaces::NetIfaceError, net::NetDeviceContainer,
 };
 
 pub(crate) use ip::{
@@ -42,7 +42,7 @@ pub(crate) enum NetProtocolError {
 
 #[derive(Debug, Clone)]
 pub(crate) enum NetProtocolOutputError {
-    TcpIpError { error: Box<TcpIpError> },
+    AppError { error: Box<AppError> },
     DeviceError { error: Box<NetDeviceError> },
 }
 

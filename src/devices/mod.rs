@@ -1,7 +1,7 @@
 use std::{fmt::Debug, sync::Arc};
 
 use crate::{
-    TcpIpError,
+    AppError,
     protocols::{IpAddr, NetProtocolError, NetProtocolType},
 };
 
@@ -50,7 +50,7 @@ pub(crate) enum NetDeviceType {
     Ethernet,
 }
 
-impl From<NetDeviceError> for TcpIpError {
+impl From<NetDeviceError> for AppError {
     fn from(value: NetDeviceError) -> Self {
         Self::DeviceError { error: value }
     }

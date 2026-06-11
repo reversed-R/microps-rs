@@ -493,7 +493,7 @@ fn output_from_device(
         &data[..SIZE_OF_IP_HEADER + packet.payload.len()],
         dummy_dst_hwaddr,
     )
-    .map_err(|e| NetProtocolOutputError::TcpIpError { error: Box::new(e) })
+    .map_err(|e| NetProtocolOutputError::AppError { error: Box::new(e) })
 }
 
 #[derive(Debug, Clone)]

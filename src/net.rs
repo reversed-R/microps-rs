@@ -25,10 +25,10 @@ const TEST_DATA: &[u8] = &[
     0x35, 0x36, 0x37, 0x38, 0x39, 0x30, 0x21, 0x40, 0x23, 0x24, 0x25, 0x5e, 0x26, 0x2a, 0x28, 0x29,
 ];
 
-static TCP_IP_APP: OnceLock<Arc<TcpIpApp>> = OnceLock::new();
+static TCP_IP_APP: OnceLock<Arc<ProtocolStackApp>> = OnceLock::new();
 
-pub fn tcp_ip_run() -> Result<(), TcpIpError> {
-    let mut tcp_ip_app = TcpIpApp::new()?;
+pub fn tcp_ip_run() -> Result<(), AppError> {
+    let mut tcp_ip_app = ProtocolStackApp::new()?;
 
     tcp_ip_app.register_net_device(crate::devices::loopback::LoopbackDevice::new);
     tcp_ip_app.register_net_device(crate::platform::linux::driver::ether_tap::EtherTapDevice::new);
@@ -57,7 +57,7 @@ pub fn tcp_ip_run() -> Result<(), TcpIpError> {
 
     TCP_IP_APP
         .set(Arc::new(tcp_ip_app))
-        .map_err(|_| TcpIpError::FaildToInit)?;
+        .map_err(|_| AppError::FaildToInit)?;
 
     TCP_IP_APP.get().unwrap().run()?;
 
@@ -65,7 +65,7 @@ pub fn tcp_ip_run() -> Result<(), TcpIpError> {
 }
 
 #[derive(Debug, Clone)]
-pub enum TcpIpError {
+pub enum AppError {
     FaildToInit,
     DeviceAlreadyOpened {
         name: String,
@@ -90,14 +90,14 @@ pub enum TcpIpError {
 }
 
 #[derive(Debug)]
-pub(crate) struct TcpIpApp {
+pub(crate) struct ProtocolStackApp {
     terminated: Arc<AtomicBool>,
     devices: Vec<Arc<NetDeviceContainer>>,
     pub(crate) protocols: Vec<Box<dyn NetProtocol>>,
 }
 
-impl TcpIpApp {
-    fn new() -> Result<Self, TcpIpError> {
+impl ProtocolStackApp {
+    fn new() -> Result<Self, AppError> {
         Ok(Self {
             terminated: Arc::new(AtomicBool::new(false)),
             devices: Vec::new(),
@@ -105,7 +105,7 @@ impl TcpIpApp {
         })
     }
 
-    fn run(&self) -> Result<(), TcpIpError> {
+    fn run(&self) -> Result<(), AppError> {
         signal_hook::flag::register(signal_hook::consts::SIGINT, Arc::clone(&self.terminated))
             .unwrap();
 
@@ -154,7 +154,7 @@ impl TcpIpApp {
         &mut self,
         mut iface: NetIface,
         dev: &str,
-    ) -> Result<(), TcpIpError> {
+    ) -> Result<(), AppError> {
         dbg!("registering iface on dev={}", dev);
 
         for d in &self.devices {
@@ -168,7 +168,7 @@ impl TcpIpApp {
                 .iter()
                 .any(|i| i.family_kind() == iface.family_kind())
             {
-                return Err(TcpIpError::DuplicatedIfaceFamily {
+                return Err(AppError::DuplicatedIfaceFamily {
                     family: iface.family_kind(),
                     dev: dev.into(),
                 });
@@ -184,7 +184,7 @@ impl TcpIpApp {
             return Ok(());
         }
 
-        Err(TcpIpError::DeviceNotFound {
+        Err(AppError::DeviceNotFound {
             dev: dev.to_string(),
         })
     }
@@ -224,10 +224,10 @@ impl NetDeviceContainer {
         &self.state
     }
 
-    fn open(&self) -> Result<(), TcpIpError> {
+    fn open(&self) -> Result<(), AppError> {
         dbg!("opening dev={}", &self.name());
         if self.is_open() {
-            Err(TcpIpError::DeviceAlreadyOpened {
+            Err(AppError::DeviceAlreadyOpened {
                 name: self.name().clone(),
             })
         } else {
@@ -237,10 +237,10 @@ impl NetDeviceContainer {
         }
     }
 
-    fn close(&self) -> Result<(), TcpIpError> {
+    fn close(&self) -> Result<(), AppError> {
         dbg!("closing dev={}", self.name());
         if !self.is_open() {
-            Err(TcpIpError::DeviceAlreadyClosed {
+            Err(AppError::DeviceAlreadyClosed {
                 name: self.name().clone(),
             })
         } else {
@@ -255,7 +255,7 @@ impl NetDeviceContainer {
         typ: NetProtocolType,
         data: &[u8],
         dst: crate::devices::EthernetAddr,
-    ) -> Result<(), TcpIpError> {
+    ) -> Result<(), AppError> {
         dbg!(
             "outputing dev={}, typ={:?}, dst={:?}",
             self.name(),
@@ -263,13 +263,13 @@ impl NetDeviceContainer {
             dst
         );
         if !self.is_open() {
-            Err(TcpIpError::DeviceAlreadyClosed {
+            Err(AppError::DeviceAlreadyClosed {
                 name: self.name().clone(),
             })
         } else {
             let mtu = self.dev().info().mtu();
             if (mtu as usize) < data.len() {
-                Err(TcpIpError::DataLongerThanMTU {
+                Err(AppError::DataLongerThanMTU {
                     mtu,
                     len: data.len(),
                 })
@@ -308,7 +308,7 @@ pub(crate) fn input_to_app(
 
     for proto in &app.protocols {
         if proto.typ() == typ {
-            proto.handle(data, &dev)?;
+            proto.handle(data, dev)?;
 
             return Ok(());
         }
