@@ -4,7 +4,7 @@ use std::fmt::Debug;
 
 use crate::{
     dbg,
-    devices::ethernet,
+    devices::{EthernetAddr, ethernet},
     interfaces::NetIface,
     net::ProtocolStackContext,
     print::debugdump,
@@ -190,7 +190,7 @@ pub(crate) struct IpHeader {
 const SIZE_OF_IP_HEADER: usize = 20;
 const _: () = assert!(SIZE_OF_IP_HEADER == core::mem::size_of::<IpHeader>());
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct IpAddr(u32);
 
 const _: () = assert!(IP_ADDR_SIZE == core::mem::size_of::<IpAddr>());
@@ -473,17 +473,25 @@ pub(crate) fn output(
         payload: data,
     };
 
-    output_from_device(ctx, packet, &dev)
+    if let Some(hw_addr) = ctx
+        .arp()
+        .unwrap()
+        .resolve(ctx.clone(), &iface, &packet.header.dst())
+    {
+        output_from_device(ctx, packet, hw_addr, &dev)
+    } else {
+        // TODO: IP packet を送信キューに入れてアドレス解決完了後に送信されるようにすべき
+        // 暫定的にはパケットを破棄
+        Ok(())
+    }
 }
 
 fn output_from_device(
     ctx: ProtocolStackContext,
     packet: IpPacket,
+    dst_hw_addr: EthernetAddr,
     dev: &crate::net::NetDeviceContainer,
 ) -> Result<(), NetProtocolOutputError> {
-    // TODO: must resolve hardware address which has IP address by ARP.
-    let dummy_dst_hwaddr = ethernet::ETHER_ADDR_ANY;
-
     // FIXME: buffer size now hard coded as MTU 1500
     let mut data = [0u8; 1500];
     let header_bytes: [u8; SIZE_OF_IP_HEADER] = unsafe { core::mem::transmute(packet.header) };
@@ -496,7 +504,7 @@ fn output_from_device(
         ctx,
         NetProtocolType::Ip,
         &data[..SIZE_OF_IP_HEADER + packet.payload.len()],
-        dummy_dst_hwaddr,
+        dst_hw_addr,
     )
     .map_err(|e| NetProtocolOutputError::AppError { error: Box::new(e) })
 }

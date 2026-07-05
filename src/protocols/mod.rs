@@ -25,6 +25,34 @@ pub(crate) enum NetProtocolType {
     IpV6,
 }
 
+#[derive(Debug)]
+pub(crate) enum NetProtocolKind {
+    Ip(ip::IpProtocol),
+    Arp(arp::ArpProtocol),
+}
+
+impl NetProtocol for NetProtocolKind {
+    #[inline]
+    fn typ(&self) -> NetProtocolType {
+        match self {
+            Self::Ip(ip) => ip.typ(),
+            Self::Arp(arp) => arp.typ(),
+        }
+    }
+
+    #[inline]
+    fn handle(
+        &self,
+        ctx: ProtocolStackContext,
+        data: &[u8],
+        dev: &NetDeviceContainer,
+    ) -> Result<(), NetProtocolError> {
+        match self {
+            Self::Ip(ip) => ip.handle(ctx, data, dev),
+            Self::Arp(arp) => arp.handle(ctx, data, dev),
+        }
+    }
+}
 pub(crate) trait NetProtocol: Debug + Send + Sync + 'static {
     fn typ(&self) -> NetProtocolType;
     fn handle(

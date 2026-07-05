@@ -8,6 +8,7 @@ use crate::{
     },
     interfaces::{IpIface, NetIface},
     net::ProtocolStackContext,
+    platform::{self, DurationSec, TimeSec},
     protocols::{AsNet, IpAddr, NetProtocol, ip::IP_ADDR_SIZE},
 };
 
@@ -201,11 +202,16 @@ impl From<ArpProtocolError> for super::NetProtocolError {
 #[derive(Debug, Clone)]
 pub(crate) struct ArpEntry {
     phys_addr: EthernetAddr,
+
+    timestamp: platform::TimeSec,
 }
+
+const ARP_CACHE_TIMEOUT: DurationSec = DurationSec::new(30);
 
 #[derive(Debug)]
 pub(crate) struct ArpProtocol {
-    cache: RwLock<HashMap<IpAddr, EthernetAddr>>,
+    // TODO: radix tree
+    cache: RwLock<HashMap<IpAddr, ArpEntry>>,
 }
 
 impl ArpProtocol {
@@ -257,6 +263,8 @@ impl NetProtocol for ArpProtocol {
 
         dbg!("{:?}", msg);
 
+        self.cache_update(msg.body.spa(), msg.body.sha());
+
         for i in &*dev.state().ifaces() {
             match i {
                 NetIface::Ip(ip_iface) => {
@@ -264,7 +272,13 @@ impl NetProtocol for ArpProtocol {
                         dbg!("iface found: ip_iface={:?}", ip_iface);
                         match msg.header.op()? {
                             ArpOp::Request => {
-                                output_ether_ip(ctx, ip_iface, msg.body.sha(), msg.body.spa());
+                                output_ether_ip(
+                                    ctx,
+                                    ArpOp::Reply,
+                                    ip_iface,
+                                    msg.body.sha(),
+                                    msg.body.spa(),
+                                );
                                 return Ok(());
                             }
                             ArpOp::Reply => {
@@ -283,7 +297,52 @@ impl NetProtocol for ArpProtocol {
     }
 }
 
-fn output_ether_ip(ctx: ProtocolStackContext, ip_iface: &IpIface, tha: EthernetAddr, tpa: IpAddr) {
+impl ArpProtocol {
+    fn cache_update(&self, ip_addr: IpAddr, ether_addr: EthernetAddr) {
+        self.cache.write().unwrap().insert(
+            ip_addr,
+            ArpEntry {
+                phys_addr: ether_addr,
+                timestamp: platform::TimeSec::now(),
+            },
+        );
+    }
+
+    pub(crate) fn resolve(
+        &self,
+        ctx: ProtocolStackContext,
+        ip_iface: &IpIface,
+        ip_addr: &IpAddr,
+    ) -> Option<EthernetAddr> {
+        if let Some(entry) = self.cache.read().unwrap().get(ip_addr)
+            && TimeSec::now() < entry.timestamp + ARP_CACHE_TIMEOUT
+        {
+            // キャッシュTTLを過ぎているエントリは無効
+            // エントリ削除はここでは行わない
+            // 無効の場合は再度ARP requestが走ってcache_update()で更新されるため
+            Some(entry.phys_addr)
+        } else {
+            // ARP request を送信しておく
+            output_ether_ip(
+                ctx,
+                ArpOp::Request,
+                ip_iface,
+                EthernetAddr::new([0; ETHER_ADDR_SIZE]),
+                *ip_addr,
+            );
+
+            None
+        }
+    }
+}
+
+fn output_ether_ip(
+    ctx: ProtocolStackContext,
+    op: ArpOp,
+    ip_iface: &IpIface,
+    tha: EthernetAddr, // request では 0:0:0:0:0:0 を渡す
+    tpa: IpAddr,
+) {
     dbg!("arp output (ethernet and ip mode)");
 
     let sha = match ip_iface.dev().unwrap().dev().info().addr() {
@@ -299,7 +358,7 @@ fn output_ether_ip(ctx: ProtocolStackContext, ip_iface: &IpIface, tha: EthernetA
             ArpProtocolAddrSpace::Ip,
             ETHER_ADDR_SIZE as u8,
             IP_ADDR_SIZE as u8,
-            ArpOp::Reply,
+            op,
         ),
         body: ArpEtherIpBody {
             sha,

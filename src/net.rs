@@ -17,7 +17,7 @@ use crate::{
     info,
     interfaces::{IfaceFamilyKind, IpIface, NetIface},
     protocols::{
-        IP_ADDR_LOOPBACK, IP_ADDR_LOOPBACK_NETMASK, IpAddr, IpProtocol, NetProtocol,
+        IP_ADDR_LOOPBACK, IP_ADDR_LOOPBACK_NETMASK, IpAddr, IpProtocol, NetProtocolKind,
         NetProtocolType, arp::ArpProtocol,
     },
 };
@@ -96,7 +96,7 @@ pub enum AppError {
 pub struct ProtocolStackApp {
     terminated: Arc<AtomicBool>,
     devices: Vec<Arc<NetDeviceContainer>>,
-    pub(crate) protocols: Vec<Box<dyn NetProtocol>>,
+    pub(crate) protocols: Vec<NetProtocolKind>,
 }
 
 impl ProtocolStackApp {
@@ -151,8 +151,8 @@ impl ProtocolStackApp {
         self.devices.push(Arc::new(dev));
     }
 
-    fn register_net_protocol<P: NetProtocol>(&mut self, proto: P) {
-        self.protocols.push(Box::new(proto));
+    fn register_net_protocol(&mut self, proto: NetProtocolKind) {
+        self.protocols.push(proto);
     }
 
     fn register_net_iface_on_device(
@@ -204,9 +204,9 @@ impl ProtocolStackApp {
                 crate::protocols::ip::icmp::IcmpProtocol,
             ))
             .unwrap();
-        self.register_net_protocol(ip_proto);
+        self.register_net_protocol(NetProtocolKind::Ip(ip_proto));
         let arp_proto = ArpProtocol::new();
-        self.register_net_protocol(arp_proto);
+        self.register_net_protocol(NetProtocolKind::Arp(arp_proto));
 
         self.register_net_iface_on_device(
             NetIface::Ip(IpIface::new(IP_ADDR_LOOPBACK, IP_ADDR_LOOPBACK_NETMASK)),

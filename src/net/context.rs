@@ -5,7 +5,7 @@ use crate::{
     interfaces::{IpIface, NetIface},
     net::ProtocolStackApp,
     print::debugdump,
-    protocols::{IpAddr, NetProtocolType},
+    protocols::{IpAddr, NetProtocol, NetProtocolKind, NetProtocolType, arp::ArpProtocol},
 };
 
 pub(crate) struct ProtocolStackContext {
@@ -58,6 +58,16 @@ impl ProtocolStackContext {
                         }
                     }
                 }
+            }
+        }
+
+        None
+    }
+
+    pub(crate) fn arp(&self) -> Option<&ArpProtocol> {
+        for proto in &self.app.protocols {
+            if let NetProtocolKind::Arp(arp) = proto {
+                return Some(arp);
             }
         }
 
