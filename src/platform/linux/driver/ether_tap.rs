@@ -1,10 +1,12 @@
+mod rx_ring;
+
 use std::{fs::OpenOptions, io::Read, os::fd::AsRawFd, sync::Arc};
 
 use crate::{
     data_structure::rcu::RcuCell,
     dbg,
     devices::{
-        self, DeviceId, NetDevice, NetDeviceAddr, NetDeviceInner, NetDeviceType,
+        self, DeviceId, NetDevice, NetDeviceAddr, NetDeviceInner, NetDeviceType, RxBuf,
         ethernet::{
             ETHER_ADDR_ANY, ETHER_ADDR_BROADCAST, ETHER_ADDR_SIZE, ETHER_FRAME_SIZE_MAX,
             ETHER_HEADER_SIZE, ETHER_PAYLOAD_SIZE_MAX, ETHER_PAYLOAD_SIZE_MIN, EthernetAddr,
@@ -13,16 +15,19 @@ use crate::{
     },
     error,
     net::ProtocolStackContext,
-    print::debugdump,
+    platform::linux::driver::ether_tap::rx_ring::EtherTapRxRing,
 };
 
 #[derive(Debug)]
 pub struct EtherTapDevice {
     inner: RcuCell<NetDeviceInner>,
     tap_file: RcuCell<libc::c_int>,
+    rx_ring: Arc<EtherTapRxRing>,
 }
 
 impl EtherTapDevice {
+    const ETHER_TAP_DEVICE_PAGE_MAX: usize = 256;
+
     pub(crate) fn new(dev_id: DeviceId) -> Self {
         Self {
             inner: RcuCell::new(NetDeviceInner::new(
@@ -35,6 +40,7 @@ impl EtherTapDevice {
                 NetDeviceAddr::Ethernet(ETHER_ADDR_BROADCAST),
             )),
             tap_file: RcuCell::new(-1),
+            rx_ring: Arc::new(EtherTapRxRing::new()),
         }
     }
 }
@@ -102,43 +108,28 @@ impl NetDevice for EtherTapDevice {
                 i
             });
         }
-        let addr = match self.inner.load().addr() {
-            NetDeviceAddr::Ethernet(addr) => *addr,
-            _ => panic!(),
-        };
 
         let dev_id = self.inner.load().dev_id();
+        let rx_ring = Arc::clone(&self.rx_ring);
         std::thread::spawn(move || {
-            let mut buf = [0u8; devices::ethernet::ETHER_FRAME_SIZE_MAX];
+            // let mut buf = [0u8; devices::ethernet::ETHER_FRAME_SIZE_MAX];
             loop {
-                match file.read(&mut buf) {
+                // SAFETY: only this thread write to rx_ring
+                let buf = match unsafe { rx_ring.buf_to_write() } {
+                    Some(buf) => buf,
+                    None => {
+                        // when overflowed, stop receiving
+                        // in real NIC, packet will be dropped
+                        continue;
+                    }
+                };
+                match file.read(buf.buf) {
                     Ok(n) => {
-                        dbg!("read from ether tap device: n={}", n);
-                        debugdump(&buf[..n]);
+                        // commit して初めてwrite位置が進む
+                        buf.commit(n);
 
-                        if n < ETHER_HEADER_SIZE {
-                            dbg!("too short data");
-                            continue;
-                        }
-
-                        let hdr_bytes: [u8; ETHER_HEADER_SIZE] =
-                            buf[..ETHER_HEADER_SIZE].try_into().unwrap();
-                        let hdr: EthernetHeader = unsafe { core::mem::transmute(hdr_bytes) };
-                        let typ = hdr.typ().unwrap();
-                        dbg!(
-                            "ether header: src={:?}, dst={:?}, typ={:?}",
-                            hdr.src(),
-                            hdr.dst(),
-                            typ
-                        );
-
-                        if hdr.dst() != addr && hdr.dst() != ETHER_ADDR_BROADCAST {
-                            dbg!("for other host");
-                            continue;
-                        }
-
-                        ctx.input(dev_id, typ.into(), &buf[ETHER_HEADER_SIZE..n])
-                            .unwrap();
+                        // soft irq にスケジューリングし、直ちに抜ける
+                        ctx.request_rx_irq(dev_id).unwrap();
                     }
                     Err(e) => {
                         error!("{}", e);
@@ -198,5 +189,52 @@ impl NetDevice for EtherTapDevice {
     fn close(&self) -> Result<(), crate::devices::NetDeviceError> {
         // nothing to do
         Ok(())
+    }
+
+    unsafe fn rx_next_clean_buf<'a>(&'a self) -> Option<devices::RxBuf<'a>> {
+        let (desc, buf) = unsafe { self.rx_ring.buf_to_clean()? };
+
+        if buf.len() < ETHER_HEADER_SIZE {
+            dbg!("too short data");
+            unsafe {
+                self.rx_free_buf(desc);
+            }
+            return None;
+        }
+
+        let hdr_bytes: [u8; ETHER_HEADER_SIZE] = buf[..ETHER_HEADER_SIZE].try_into().unwrap();
+        let hdr: EthernetHeader = unsafe { core::mem::transmute(hdr_bytes) };
+        let typ = hdr.typ().unwrap();
+        dbg!(
+            "ether header: src={:?}, dst={:?}, typ={:?}",
+            hdr.src(),
+            hdr.dst(),
+            typ
+        );
+
+        let addr = match self.inner.load().addr() {
+            NetDeviceAddr::Ethernet(addr) => *addr,
+            _ => panic!(),
+        };
+
+        if hdr.dst() != addr && hdr.dst() != ETHER_ADDR_BROADCAST {
+            dbg!("for other host");
+            unsafe {
+                self.rx_free_buf(desc);
+            }
+            return None;
+        }
+
+        Some(RxBuf {
+            desc,
+            typ: typ.into(),
+            buf: &buf[ETHER_HEADER_SIZE..],
+        })
+    }
+
+    unsafe fn rx_free_buf(&self, desc: devices::RxBufDesc) {
+        unsafe {
+            self.rx_ring.free_buf(desc);
+        }
     }
 }

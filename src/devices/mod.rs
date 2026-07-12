@@ -36,6 +36,30 @@ pub(crate) trait NetDevice: Debug + Send + Sync + 'static {
         dst: EthernetAddr,
     ) -> Result<(), NetDeviceError>;
     fn close(&self) -> Result<(), NetDeviceError>;
+
+    unsafe fn rx_next_clean_buf<'a>(&'a self) -> Option<RxBuf<'a>>;
+
+    unsafe fn rx_free_buf(&self, desc: RxBufDesc);
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub(crate) struct RxBufDesc(usize);
+
+impl RxBufDesc {
+    pub(crate) fn new(desc: usize) -> Self {
+        Self(desc)
+    }
+
+    pub(crate) fn value(&self) -> usize {
+        self.0
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct RxBuf<'a> {
+    pub(crate) desc: RxBufDesc,
+    pub(crate) typ: NetProtocolType,
+    pub(crate) buf: &'a [u8],
 }
 
 #[derive(Debug, Clone)]

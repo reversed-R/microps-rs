@@ -5,7 +5,7 @@ use crate::{
     interfaces::{IpIface, NetIface},
     net::ProtocolStackApp,
     print::debugdump,
-    protocols::{IpAddr, NetProtocol, NetProtocolKind, NetProtocolType, arp::ArpProtocol},
+    protocols::{IpAddr, NetProtocol, NetProtocolKind, arp::ArpProtocol},
 };
 
 pub(crate) struct ProtocolStackContext {
@@ -25,25 +25,39 @@ impl ProtocolStackContext {
         Self { app: Arc::new(app) }
     }
 
-    pub(crate) fn input(
-        &self,
-        dev_id: DeviceId,
-        typ: NetProtocolType,
-        data: &[u8],
-    ) -> Result<(), NetDeviceError> {
-        dbg!("net_input: type={typ:?}, len={}", data.len());
+    pub(crate) fn request_rx_irq(&self, dev_id: DeviceId) -> Result<(), NetDeviceError> {
+        let ctx = self.clone();
+        std::thread::spawn(move || {
+            let dev = ctx.app.devices.get(dev_id.value()).unwrap();
+            let Some(rx_buf) = (unsafe { dev.dev.rx_next_clean_buf() }) else {
+                return;
+            };
+            // dev から clean すべき DMA buffer を dequeue
+            // ここで初めて受信パケットのL2の処理が行われ、
+            // L3への入力としてのバッファが返される
 
-        debugdump(data);
+            debugdump(rx_buf.buf);
 
-        let dev = self.app.devices.get(dev_id.value()).unwrap();
+            for proto in &ctx.app.protocols {
+                if proto.typ() == rx_buf.typ {
+                    let res = proto.handle(ctx.clone(), rx_buf.buf, dev);
 
-        for proto in &self.app.protocols {
-            if proto.typ() == typ {
-                proto.handle(self.clone(), data, dev)?;
+                    unsafe {
+                        dev.dev.rx_free_buf(rx_buf.desc);
+                    }
 
-                return Ok(());
+                    res.inspect_err(|e| {
+                        println!("{e:?}");
+                    })
+                    .unwrap();
+                    return;
+                }
             }
-        }
+
+            unsafe {
+                dev.dev.rx_free_buf(rx_buf.desc);
+            }
+        });
 
         Ok(())
     }

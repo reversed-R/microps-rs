@@ -4,7 +4,7 @@ use std::fmt::Debug;
 
 use crate::{
     dbg,
-    devices::{EthernetAddr, ethernet},
+    devices::{EthernetAddr, ethernet::ETHER_FRAME_SIZE_MAX},
     interfaces::NetIface,
     net::ProtocolStackContext,
     print::debugdump,
@@ -189,6 +189,8 @@ pub(crate) struct IpHeader {
 
 const SIZE_OF_IP_HEADER: usize = 20;
 const _: () = assert!(SIZE_OF_IP_HEADER == core::mem::size_of::<IpHeader>());
+
+pub(crate) const IP_PAYLOAD_SIZE_MAX: usize = ETHER_FRAME_SIZE_MAX - SIZE_OF_IP_HEADER;
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct IpAddr(u32);
