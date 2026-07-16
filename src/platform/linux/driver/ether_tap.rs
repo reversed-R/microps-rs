@@ -216,6 +216,7 @@ impl NetDevice for EtherTapDevice {
             NetDeviceAddr::Ethernet(addr) => *addr,
             _ => panic!(),
         };
+        dbg!("addr: {:?}", addr);
 
         if hdr.dst() != addr && hdr.dst() != ETHER_ADDR_BROADCAST {
             dbg!("for other host");

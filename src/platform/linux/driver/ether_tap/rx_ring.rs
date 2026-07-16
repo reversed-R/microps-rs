@@ -109,6 +109,17 @@ impl EtherTapRxRing {
     ///
     /// You must logically guarantee only single thread calls `free_buf()` for SAFETY
     pub(crate) unsafe fn free_buf(&self, desc: RxBufDesc) {
+        self.next_to_clean
+            .update(Ordering::Release, Ordering::Acquire, |next_to_clean| {
+                if next_to_clean + 1
+                    == EtherTapDevice::ETHER_TAP_DEVICE_PAGE_MAX * Self::buf_per_page()
+                {
+                    0
+                } else {
+                    next_to_clean + 1
+                }
+            });
+
         let next_to_write = self.next_to_write.load(Ordering::Acquire);
         self.end_of_writable
             .update(Ordering::Release, Ordering::Acquire, |end_of_writable| {
@@ -140,8 +151,9 @@ impl EtherTapRxRing {
                 Some(EtherTapRxRingWriteBuf {
                     buf: &mut (&mut *self.dma_pages[write_idx].get())
                         .page
-                        .as_mut()
-                        .unwrap()
+                        .get_or_insert_with(Page::alloc)
+                        // .as_mut()
+                        // .unwrap()
                         .as_slice_mut()[write_offset..],
                     next_to_write: &self.next_to_write,
                     buf_info: &mut *self.buf_descs[next_to_write].get(),

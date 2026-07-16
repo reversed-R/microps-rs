@@ -81,6 +81,14 @@ impl LoRxRing {
     ///
     /// You must logically guarantee only single thread calls `free_buf()` for SAFETY
     pub(crate) unsafe fn free_buf(&self, desc: RxBufDesc) {
+        self.next_to_clean
+            .update(Ordering::Release, Ordering::Acquire, |next_to_clean| {
+                if next_to_clean + 1 == LOOPBACK_DEVICE_NR_BUFS {
+                    0
+                } else {
+                    next_to_clean + 1
+                }
+            });
         let next_to_write = self.next_to_write.load(Ordering::Acquire);
         self.end_of_writable
             .update(Ordering::Release, Ordering::Acquire, |end_of_writable| {
@@ -109,7 +117,7 @@ impl LoRxRing {
                 let pk_buf = &mut *self.packet_bufs[next_to_write].get();
 
                 Some(LoRxRingWriteBuf {
-                    buf: pk_buf.buf.as_mut().unwrap(),
+                    buf: pk_buf.buf.get_or_insert([0; IP_PAYLOAD_SIZE_MAX]).as_mut(),
                     next_to_write: &self.next_to_write,
                     size: &mut pk_buf.written_size,
                 })
